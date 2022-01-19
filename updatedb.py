@@ -4,21 +4,33 @@
 _DEBUG = True
 COMMIT_INTERVAL = 50
 
+import os, sys, string, stat, subprocess, time, json, argparse, logging
+import tempfile
+from datetime import datetime
+
 try:
 	_DEBUG
 except NameError:
 	_DEBUG = False
+	loglevel = logging.INFO
 
-import os, sys, string, stat, subprocess, time, json, argparse
-from datetime import datetime
+myname = os.path.splitext(os.path.basename(__file__))[0]
 
-#~ print("!\n+\n-\n---\n+++\n>\n<\n")
+if _DEBUG:
+	loglevel = logging.DEBUG
+
+logging.basicConfig(level=loglevel, format='%(filename)s:%(lineno)d: ' + \
+	'%(name)s: %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+logd=logger.debug
+logi=logger.info
+logw=logger.warning
+loge=logger.error
+logc=logger.critical
 
 import sqlalchemy, magic
 
 from config import cfg
-#~ print(cfg)
-logd = cfg.logd
 
 from models import FSItemFolder, FSItemType, FSItem, InitDB
 
@@ -80,7 +92,7 @@ def fsitem_add_or_update(item):
 
 
 def logd_status(itemcount, changes, elapsed):
-	status = ("items = %r, speed = %.2f items/sec,	" + \
+	status = ("items = %r, speed = %.2f items/sec, " + \
 		"changes = %r, speed = %.2f changes/sec")%(
 		itemcount, itemcount / elapsed,
 		changes, changes / elapsed
@@ -147,6 +159,8 @@ def get_description(fp_item):
 def updatedb(startpath):
 	global session
 
+	logd("Updating database '%s'", cfg.fn_database)
+
 	session = InitDB()
 
 	paths = [startpath]
@@ -172,7 +186,7 @@ def updatedb(startpath):
 			continue
 
 		if path in cfg.exclude_folders:
-			logd("Folder '%s' excluded by config", path)
+			logw("Folder '%s' excluded by config", path)
 			continue
 
 		if len(itemlist)==0:
@@ -196,7 +210,7 @@ def updatedb(startpath):
 
 			if stat.S_ISDIR(item_stat.st_mode):		# folder
 				if item in cfg.exclude_folders:
-					logd("Folder '%s' excluded by config", item)
+					logw("Folder '%s' excluded by config", item)
 					continue
 
 				paths.append(fp_item)
@@ -244,6 +258,8 @@ def updatedb(startpath):
 	logd_status(itemcount, changes, elapsed)
 	session.commit()
 	session.close()
+	logd("Updating database '%s' finished in %.2f sec",
+		cfg.fn_database, elapsed)
 
 
 def parse_commandline(args):
@@ -270,6 +286,9 @@ def parse_commandline(args):
 	#~ logd(ns)
 
 	cfg.debug = ns.debug
+	if cfg.debug:
+		logger.setLevel(logging.DEBUG)
+
 	if ns.exclude_folder is not None and len(ns.exclude_folder)>0:
 		cfg.exclude_folders.extend(ns.exclude_folder)
 
@@ -289,6 +308,24 @@ def parse_commandline(args):
 		save_obj(dconfig, cfg.fn_config)
 
 
+def cleardb():
+	global session
+	logd("Cleaning database '%s'", cfg.fn_database)
+	session = InitDB()
+	dt_scan = datetime.now()	# cleaning datetime
+	itemcount = 0
+	changes = 0
+	t_start = time.perf_counter()
+
+
+
+	elapsed = time.perf_counter() - t_start
+	logd_status(itemcount, changes, elapsed)
+	session.commit()
+	session.close()
+	logd("Cleaning database '%s' finished in %.2f sec",
+		cfg.fn_database, elapsed)
+
 def main():
 
 	if os.path.exists(cfg.fn_config):
@@ -297,6 +334,7 @@ def main():
 
 	parse_commandline(sys.argv)
 
+	cleardb()
 	updatedb("C:\\slair\\tmp")
 
 

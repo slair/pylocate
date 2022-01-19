@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-#~ _DEBUG = True
 myname = "pylocate"
 
 try:
@@ -9,13 +8,20 @@ try:
 except NameError:
 	_DEBUG = False
 
-import os, sys, string
+import sys, os, logging, tempfile
+
+logger = logging.getLogger(__name__)
+#~ logger.setLevel(logging.DEBUG)
+logd=logger.debug
+logi=logger.info
+logw=logger.warning
+loge=logger.error
+logc=logger.critical
 
 class CFG(object):
 	exclude_folders = []
 	_debug = _DEBUG
 	fn_database = "locate.db"
-	myname = None
 
 	def __new__(cls):
 		if not hasattr(cls, 'instance'):
@@ -27,6 +33,8 @@ class CFG(object):
 
 		for key,value in keywords.items():
 			setattr(self, key, value)
+
+		#~ self.logd = self._logd
 
 		if "HOME" in os.environ:
 			env_HOME = os.environ["HOME"]
@@ -74,7 +82,7 @@ class CFG(object):
 		return res
 
 
-	def logd(self, *args, **kwargs):
+	def _logd(self, *args, **kwargs):
 		if not self._debug:
 			return
 		if len(args)>1:
@@ -85,9 +93,11 @@ class CFG(object):
 
 	def setup_logging(self, *args, **kwargs):
 		if self._debug:
-			print("setup logging")
+			logger.setLevel(logging.DEBUG)
+			logd("setup logging")
 		else:
-			print("shutdown logging")
+			logd("shutdown logging")
+			logger.setLevel(logging.INFO)
 
 
 	@property
@@ -101,7 +111,6 @@ class CFG(object):
 
 # end CFG class ===
 cfg = CFG()
-cfg.myname = myname
 #~ print(cfg)
 
 def main():

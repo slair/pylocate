@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-#~ import os, sys, stat
+import logging
 #~ from datetime import datetime
 
 import sqlalchemy
@@ -13,7 +13,14 @@ from sqlalchemy_utils import database_exists, create_database
 
 from config import cfg
 #~ print(cfg)
-logd = cfg.logd
+#~ logd = cfg.logd
+logger = logging.getLogger(__name__)
+#~ logger.setLevel(logging.DEBUG)
+logd=logger.debug
+logi=logger.info
+logw=logger.warning
+loge=logger.error
+logc=logger.critical
 
 fn_database = cfg.fn_database
 
@@ -42,6 +49,7 @@ class FSItemType(_Base):
 
 	id			= Column(Integer, primary_key = True, nullable=False)
 	name		= Column(String, nullable=False, unique=True)
+	description	= Column(String)
 	fsitems		= relationship('FSItem', backref='fsitems', lazy='dynamic')
 
 	def __str__(self):
@@ -65,7 +73,7 @@ class FSItem(_Base):
 	nlink		= Column(Integer, nullable=False)
 	dev			= Column(Integer, nullable=False)
 	stime		= Column(DateTime, nullable=False)
-	dtime		= Column(DateTime)					# deletion time
+	#~ dtime		= Column(DateTime)					# deletion time
 	size		= Column(Integer, nullable=False)
 	type_id		= Column(Integer, ForeignKey("types.id"), nullable=False)
 	target		= Column(String)	# target of symbolic link
