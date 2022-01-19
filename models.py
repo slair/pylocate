@@ -96,7 +96,7 @@ class FSItem(_Base):
 	ctime		= Column(DateTime, nullable=False)
 
 	def __str__(self):
-		res="%s {"%(self.__class__)
+		res="\n%s {"%(self.__class__)
 		for attr in dir(self):
 			if not attr[0]=="_" and not callable(getattr(self, attr)):
 				res += "\n\t%s = %s"%(attr, getattr(self, attr))

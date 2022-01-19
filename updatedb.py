@@ -293,9 +293,11 @@ def updatedb(startpath):
 	elapsed = time.perf_counter() - t_start
 	logd_status(itemcount, changes, elapsed)
 	session.commit()
-	session.close()
 	logd("Finished updating database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
+
+	clear_empty_folders(time.perf_counter(), session)
+	session.close()
 
 
 def parse_commandline(args):
@@ -346,17 +348,9 @@ def parse_commandline(args):
 		save_obj(dconfig, cfg.fn_config)
 
 
-def cleardb():
-	global session
-	logd("Cleaning database '%s'", cfg.fn_database)
-	session = InitDB()
-	dt_scan = datetime.now()	# cleaning datetime
-	itemcount = 0
-	changes = 0
-	t_start = time.perf_counter()
-
+def clear_nonexist_folders(t_start, session):
 	session.begin()
-	logd("Checking folders")
+	logd("Checking folders...")
 	folders = session.query(FSItemFolder).all()
 	deleted = 0
 	checked = 0
@@ -367,26 +361,63 @@ def cleardb():
 			deleted += 1
 		checked += 1
 	session.commit()
+	elapsed = time.perf_counter() - t_start
 	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
 
+
+def clear_nonexist_files(t_start, session):
 	session.begin()
-	logd("Checking files")
+	logd("Checking files...")
 	files = session.query(FSItem).all()
 	deleted = 0
 	checked = 0
 	for f in files:
-		if not os.path.exists(f.fullpath):
-			logd("Delete %s", f.fullpath)
+		folder = f.folder.name
+		name = f.name
+		fullpath = os.path.join(folder, name)
+		if not os.path.exists(fullpath) and not os.path.islink(fullpath):
+			logd("Delete %s", fullpath)
 			session.delete(f)
 			deleted += 1
 		checked += 1
 	session.commit()
+	elapsed = time.perf_counter() - t_start
 	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
 
-	elapsed = time.perf_counter() - t_start
-	#~ logd_status(itemcount, changes, elapsed)
+
+def clear_empty_folders(t_start, session):
+	session.begin()
+	logd("Checking empty folders...")
+	folders = session.query(FSItemFolder).all()
+	deleted = 0
+	checked = 0
+	for f in folders:
+		if len(f.fsitems)==0:
+			logd("Delete %s", f.name)
+			session.delete(f)
+			deleted += 1
+		checked += 1
 	session.commit()
+	elapsed = time.perf_counter() - t_start
+	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+
+
+def cleardb():
+	global session
+	logd("Cleaning database '%s'", cfg.fn_database)
+	t_start = time.perf_counter()
+
+	session = InitDB()
+
+	clear_nonexist_folders(time.perf_counter(), session)
+
+	clear_nonexist_files(time.perf_counter(), session)
+
+	clear_empty_folders(time.perf_counter(), session)
+
 	session.close()
+
+	elapsed = time.perf_counter() - t_start
 	logd("Finished cleaning database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
 
