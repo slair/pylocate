@@ -31,7 +31,10 @@ class FSItemFolder(_Base):		# folder have inode (renaming!!)
 
 	id			= Column(Integer, primary_key = True, nullable=False)
 	name		= Column(String, nullable=False, unique=True)
-	files		= relationship('FSItem', backref='files', lazy='dynamic')
+	description	= Column(String)
+	#~ files		= relationship("FSItem", lazy='dynamic',
+					#~ cascade="all, delete-orphan", backref="folder",
+					#~ passive_deletes=True)
 
 	def __str__(self):
 		res="%s {"%(self.__class__)
@@ -49,8 +52,7 @@ class FSItemType(_Base):
 
 	id			= Column(Integer, primary_key = True, nullable=False)
 	name		= Column(String, nullable=False, unique=True)
-	description	= Column(String)
-	fsitems		= relationship('FSItem', backref='fsitems', lazy='dynamic')
+	#~ files		= relationship('FSItem', backref='type', lazy='dynamic')
 
 	def __str__(self):
 		res="%s {"%(self.__class__)
@@ -67,7 +69,14 @@ class FSItem(_Base):
 	__tablename__ = "fsitems"
 
 	id			= Column(Integer, primary_key = True, nullable=False)
-	folder_id	= Column(Integer, ForeignKey("folders.id"), nullable=False)
+
+	folder_id	= Column(Integer,
+					ForeignKey(FSItemFolder.id, ondelete="CASCADE"),
+					nullable=False)
+	#~ folder		= relationship("FSItemFolder", back_populates="files")
+	folder		= relationship(FSItemFolder,
+					backref=backref("fsitems", cascade="all,delete"))
+
 	name		= Column(String, nullable=False)
 	inode		= Column(Integer, nullable=False)
 	nlink		= Column(Integer, nullable=False)
@@ -75,7 +84,11 @@ class FSItem(_Base):
 	stime		= Column(DateTime, nullable=False)
 	#~ dtime		= Column(DateTime)					# deletion time
 	size		= Column(Integer, nullable=False)
+
 	type_id		= Column(Integer, ForeignKey("types.id"), nullable=False)
+	type		= relationship("FSItemType",
+					backref=backref("fsitems", cascade="all,delete"))
+
 	target		= Column(String)	# target of symbolic link
 	description	= Column(String)
 	atime		= Column(DateTime, nullable=False)
@@ -118,8 +131,11 @@ def InitDB():
 session = InitDB()
 
 def main():
+	fsitem = FSItemFolder()
+	print(fsitem)
+	fsitem = FSItemType()
+	print(fsitem)
 	fsitem = FSItem()
-	#~ session.add(fsitem)
 	print(fsitem)
 	#~ session.commit()
 

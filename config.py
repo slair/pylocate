@@ -67,7 +67,7 @@ class CFG(object):
 			logd("Creating folder: %r", self.fn_data)
 			os.makedirs(self.fn_data)
 
-		self.fn_database = os.path.join(self.fn_data, myname+".db")
+		self.fn_database = os.path.join(self.fn_data, myname+".sqlite")
 		self.fn_config = os.path.join(self._xdg_config_home, myname+".json")
 
 

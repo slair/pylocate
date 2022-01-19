@@ -53,7 +53,7 @@ def load_obj(fn):
 
 
 def fsitem_add_or_update(item):
-	cmp_attrs = ("dtime", "size", "type_id", "description", "atime",
+	cmp_attrs = ("size", "type_id", "description", "atime",
 		"mtime", "ctime", "inode", "dev", "nlink")
 
 	try:
@@ -109,11 +109,17 @@ def get_folder_id(fp_item):
 	except sqlalchemy.exc.NoResultFound:
 		db_item = None
 
+	desc = get_description(fp_item)
+
 	if db_item is None:
-		logd("get_folder_id:	%s %s", len(session.new), session.new)
-		db_item = FSItemFolder(name=fp_item)
+		if len(session.new)>0:
+			logd("get_folder_id:	%s %s", len(session.new), session.new)
+		db_item = FSItemFolder(name=fp_item, description=desc)
 		session.add(db_item)
 		session.commit()
+	else:
+		if db_item.description!=desc:
+			db_item.description=desc
 
 	return db_item.id
 
@@ -144,7 +150,8 @@ def get_type_id(fp_item, s=None):
 		db_item = None
 
 	if db_item is None:
-		logd("get_type_id:	%s %s", len(session.new), session.new)
+		if len(session.new)>0:
+			logd("get_type_id:	%s %s", len(session.new), session.new)
 		db_item = FSItemType(name=t)
 		session.add(db_item)
 		session.commit()
@@ -153,7 +160,35 @@ def get_type_id(fp_item, s=None):
 
 
 def get_description(fp_item):
-	...
+	folder = os.path.dirname(fp_item)
+	name = os.path.basename(fp_item)
+	fn_descfile = os.path.join(folder, "Descript.ion")
+
+	if not os.path.exists(fn_descfile):
+		return None
+
+	with open(fn_descfile, "r", encoding="cp866") as f:
+		for line in f:
+			line = line.strip()
+			#~ logd(line)
+			if line[0]=="\"":
+				bq = 1
+				eq = line.find("\"", bq)
+				#~ logd("bq=%r, eq=%r", bq, eq)
+				fn = line[bq:eq]
+				d = line[eq+2:]
+			else:
+				#~ logd(line)
+				eq = line.find(" ")
+				fn = line[:eq]
+				d = line[eq+1:]
+				#~ logd("fn=%s, d=%s", fn, d)
+
+			if fn==name:
+				logd("Description for '%s' found '%s'", name, d)
+				return d
+
+	return None
 
 
 def updatedb(startpath):
@@ -244,8 +279,9 @@ def updatedb(startpath):
 				changes += fsitem_add_or_update(fsitem)
 
 				if changes!=0 and changes % COMMIT_INTERVAL == 0:
-					logd("updatedb:	%s %s", len(session.new), session.new)
-					session.commit()
+					if len(session.new)>0:
+						logd("updatedb:	%s %s", len(session.new), session.new)
+						session.commit()
 
 				if itemcount!=0 and itemcount % COMMIT_INTERVAL == 0:
 					elapsed = time.perf_counter() - t_start
@@ -258,7 +294,7 @@ def updatedb(startpath):
 	logd_status(itemcount, changes, elapsed)
 	session.commit()
 	session.close()
-	logd("Updating database '%s' finished in %.2f sec",
+	logd("Finished updating database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
 
 
@@ -295,6 +331,8 @@ def parse_commandline(args):
 	if ns.recreate:
 		logd("Deleting database: '%s'", cfg.fn_database)
 		os.unlink(cfg.fn_database)
+		print("Database '%s' deleted!" % cfg.fn_database)
+		sys.exit(0)
 
 	#~ logd(cfg)
 
@@ -317,13 +355,39 @@ def cleardb():
 	changes = 0
 	t_start = time.perf_counter()
 
+	session.begin()
+	logd("Checking folders")
+	folders = session.query(FSItemFolder).all()
+	deleted = 0
+	checked = 0
+	for f in folders:
+		if not os.path.exists(f.name):
+			logd("Delete %s", f.name)
+			session.delete(f)
+			deleted += 1
+		checked += 1
+	session.commit()
+	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
 
+	session.begin()
+	logd("Checking files")
+	files = session.query(FSItem).all()
+	deleted = 0
+	checked = 0
+	for f in files:
+		if not os.path.exists(f.fullpath):
+			logd("Delete %s", f.fullpath)
+			session.delete(f)
+			deleted += 1
+		checked += 1
+	session.commit()
+	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
 
 	elapsed = time.perf_counter() - t_start
-	logd_status(itemcount, changes, elapsed)
+	#~ logd_status(itemcount, changes, elapsed)
 	session.commit()
 	session.close()
-	logd("Cleaning database '%s' finished in %.2f sec",
+	logd("Finished cleaning database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
 
 def main():
