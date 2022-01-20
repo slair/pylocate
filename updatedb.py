@@ -5,8 +5,12 @@ _DEBUG = True
 COMMIT_INTERVAL = 50
 
 import os, sys, string, stat, subprocess, time, json, argparse, logging
+stop = sys.exit
+
 import tempfile
 from datetime import datetime
+
+from dbgtools import str_obj
 
 try:
 	_DEBUG
@@ -129,14 +133,19 @@ def get_type_id(fp_item, s=None):
 	if s is None:
 		try:
 			t = magic.from_file(fp_item)
+
 		except FileNotFoundError:
 			t = "cannot open %r"%fp_item
+
+		except PermissionError as e:
+			t = "Error: permission denied"
 
 		if t.startswith("cannot open "):
 			try:
 				t = magic.from_buffer(open(fp_item, "rb").read(1024))
 			except FileNotFoundError:
-				t = "FileNotFoundError %r"%fp_item
+				#~ t = "FileNotFoundError %r"%fp_item
+				t = "Error: file not found"
 	else:
 		t = s
 
@@ -190,6 +199,136 @@ def get_description(fp_item):
 
 	return None
 
+# win32 code begin =============================================================
+
+from ctypes import *
+from ctypes.wintypes import *
+
+kernel32 = WinDLL('kernel32')
+
+GetFileAttributesW = kernel32.GetFileAttributesW
+GetFileAttributesW.restype = DWORD
+GetFileAttributesW.argtypes = (LPCWSTR,) #lpFileName In
+
+INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+FILE_ATTRIBUTE_REPARSE_POINT = 0x00400
+
+CreateFileW = kernel32.CreateFileW
+CreateFileW.restype = HANDLE
+CreateFileW.argtypes = (LPCWSTR, #lpFileName In
+						DWORD,   #dwDesiredAccess In
+						DWORD,   #dwShareMode In
+						LPVOID,  #lpSecurityAttributes In_opt
+						DWORD,   #dwCreationDisposition In
+						DWORD,   #dwFlagsAndAttributes In
+						HANDLE)  #hTemplateFile In_opt
+
+OPEN_EXISTING = 3
+FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+INVALID_HANDLE_VALUE = HANDLE(-1).value
+MAXIMUM_REPARSE_DATA_BUFFER_SIZE = 0x4000
+
+DeviceIoControl = kernel32.DeviceIoControl
+DeviceIoControl.restype = BOOL
+DeviceIoControl.argtypes = (HANDLE,  #hDevice In
+							DWORD,   #dwIoControlCode In
+							LPVOID,  #lpInBuffer In_opt
+							DWORD,   #nInBufferSize In
+							LPVOID,  #lpOutBuffer Out_opt
+							DWORD,   #nOutBufferSize In
+							LPDWORD, #lpBytesReturned Out_opt
+							LPVOID)  #lpOverlapped Inout_opt
+
+FSCTL_GET_REPARSE_POINT = 0x000900A8
+
+UCHAR = c_ubyte
+
+class GENERIC_REPARSE_BUFFER(Structure):
+	_fields_ = (('DataBuffer', UCHAR * 1),)
+
+class SYMBOLIC_LINK_REPARSE_BUFFER(Structure):
+	_fields_ = (('SubstituteNameOffset', USHORT),
+				('SubstituteNameLength', USHORT),
+				('PrintNameOffset', USHORT),
+				('PrintNameLength', USHORT),
+				('Flags', ULONG),
+				('PathBuffer', WCHAR * 1))
+	@property
+	def PrintName(self):
+		arrayt = WCHAR * (self.PrintNameLength // 2)
+		offset = type(self).PathBuffer.offset + self.PrintNameOffset
+		return arrayt.from_address(addressof(self) + offset).value
+
+class MOUNT_POINT_REPARSE_BUFFER(Structure):
+	_fields_ = (('SubstituteNameOffset', USHORT),
+				('SubstituteNameLength', USHORT),
+				('PrintNameOffset', USHORT),
+				('PrintNameLength', USHORT),
+				('PathBuffer', WCHAR * 1))
+	@property
+	def PrintName(self):
+		arrayt = WCHAR * (self.PrintNameLength // 2)
+		offset = type(self).PathBuffer.offset + self.PrintNameOffset
+		return arrayt.from_address(addressof(self) + offset).value
+
+class REPARSE_DATA_BUFFER(Structure):
+	class REPARSE_BUFFER(Union):
+		_fields_ = (('SymbolicLinkReparseBuffer',
+						SYMBOLIC_LINK_REPARSE_BUFFER),
+					('MountPointReparseBuffer',
+						MOUNT_POINT_REPARSE_BUFFER),
+					('GenericReparseBuffer',
+						GENERIC_REPARSE_BUFFER))
+	_fields_ = (('ReparseTag', ULONG),
+				('ReparseDataLength', USHORT),
+				('Reserved', USHORT),
+				('ReparseBuffer', REPARSE_BUFFER))
+	_anonymous_ = ('ReparseBuffer',)
+
+CloseHandle = kernel32.CloseHandle
+CloseHandle.restype = BOOL
+CloseHandle.argtypes = (HANDLE,) #hObject In
+
+def isNTFSlink(path):
+	result = GetFileAttributesW(path)
+	if result == INVALID_FILE_ATTRIBUTES:
+		raise WinError()
+	return bool(result & FILE_ATTRIBUTE_REPARSE_POINT)
+
+IO_REPARSE_TAG_SYMLINK = 0xA000000C
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+
+def NTFSreadlink(path):
+	reparse_point_handle = CreateFileW(path,
+									   0,
+									   0,
+									   None,
+									   OPEN_EXISTING,
+									   FILE_FLAG_OPEN_REPARSE_POINT |
+									   FILE_FLAG_BACKUP_SEMANTICS,
+									   None)
+	if reparse_point_handle == INVALID_HANDLE_VALUE:
+		raise WinError()
+	target_buffer = c_buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE)
+	n_bytes_returned = DWORD()
+	io_result = DeviceIoControl(reparse_point_handle,
+								FSCTL_GET_REPARSE_POINT,
+								None, 0,
+								target_buffer, len(target_buffer),
+								byref(n_bytes_returned),
+								None)
+	CloseHandle(reparse_point_handle)
+	if not io_result:
+		raise WinError()
+	rdb = REPARSE_DATA_BUFFER.from_buffer(target_buffer)
+	if rdb.ReparseTag == IO_REPARSE_TAG_SYMLINK:
+		return rdb.SymbolicLinkReparseBuffer.PrintName
+	elif rdb.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT:
+		return rdb.MountPointReparseBuffer.PrintName
+	raise ValueError("not a link")
+
+# win32 code end ===============================================================
 
 def updatedb(startpath):
 	global session
@@ -211,9 +350,124 @@ def updatedb(startpath):
 
 		path = paths.pop(0)
 
+		#~ logd("os.path.ismount(path)=%s", os.path.ismount(path))
+		#~ logd("os.path.islink(path)=%s", os.path.islink(path))
+
+		dest = None
+		try:
+			dest = os.readlink(path)
+		except ValueError as e:
+			pass
+			#~ loge(path)
+			#~ loge(str_obj(e))
+
+		except OSError as e:
+			if e.errno==13:
+				type_id = get_type_id(path, "Error: permission denied")
+				folder_id = get_folder_id(os.path.dirname(path))
+
+				item_stat = os.stat(path, follow_symlinks=False)
+
+				fsitem = FSItem(
+					folder_id	= folder_id,
+					name		= os.path.basename(path),
+					type_id		= type_id,
+					inode		= item_stat.st_ino,
+					nlink		= item_stat.st_nlink,
+					dev			= item_stat.st_dev,
+					size		= item_stat.st_size,
+					target		= target,
+					description	= get_description(path),
+					stime		= dt_scan,
+					atime		= datetime.fromtimestamp(item_stat.st_atime),
+					mtime		= datetime.fromtimestamp(item_stat.st_mtime),
+					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+				)
+
+				logd(fsitem)
+				changes += fsitem_add_or_update(fsitem)
+				continue
+
+			elif not e.errno in (22,):
+				loge(path)
+				loge(str_obj(e))
+				stop()
+
+		if dest:
+			logd("Link found: %s -> %s", path, dest)
+			stop(0)
+		else:
+			jp = isNTFSlink(path)
+			if jp:
+				loge("isNTFSlink('%s')=%s", path, jp)
+				dest = NTFSreadlink(path)
+				type_id = get_type_id(path, "junction link")
+
+		if dest:
+			logd("Link found: %s -> %s", path, dest)
+			target = dest
+
+			folder_id = get_folder_id(os.path.dirname(path))
+
+			item_stat = os.stat(path, follow_symlinks=False)
+
+			fsitem = FSItem(
+				folder_id	= folder_id,
+				name		= os.path.basename(path),
+				type_id		= type_id,
+				inode		= item_stat.st_ino,
+				nlink		= item_stat.st_nlink,
+				dev			= item_stat.st_dev,
+				size		= item_stat.st_size,
+				target		= target,
+				description	= get_description(path),
+				stime		= dt_scan,
+				atime		= datetime.fromtimestamp(item_stat.st_atime),
+				mtime		= datetime.fromtimestamp(item_stat.st_mtime),
+				ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+			)
+
+			logd(fsitem)
+			changes += fsitem_add_or_update(fsitem)
+			continue
+
 		try:
 			itemlist = os.listdir(path)
-		except NotADirectoryError:
+
+		except PermissionError as e:
+			if e.errno==13:
+				type_id = get_type_id(path, "Error: permission denied")
+				folder_id = get_folder_id(os.path.dirname(path))
+
+				item_stat = os.stat(path, follow_symlinks=False)
+
+				fsitem = FSItem(
+					folder_id	= folder_id,
+					name		= os.path.basename(path),
+					type_id		= type_id,
+					inode		= item_stat.st_ino,
+					nlink		= item_stat.st_nlink,
+					dev			= item_stat.st_dev,
+					size		= item_stat.st_size,
+					target		= target,
+					description	= get_description(path),
+					stime		= dt_scan,
+					atime		= datetime.fromtimestamp(item_stat.st_atime),
+					mtime		= datetime.fromtimestamp(item_stat.st_mtime),
+					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+				)
+
+				logd(fsitem)
+				changes += fsitem_add_or_update(fsitem)
+				continue
+			else:
+				loge(path)
+				loge(str_obj(e))
+				stop()
+
+		except NotADirectoryError as e:
+			loge(path)
+			loge(str_obj(e))
 			# NotADirectoryError: [WinError 267]
 			# Неверно задано имя папки: 'C:\\slair\\tmp\\bad-fff'
 			# файловый симлинк на фолдер
@@ -437,7 +691,8 @@ def main():
 	parse_commandline(sys.argv)
 
 	cleardb()
-	updatedb("C:\\slair\\tmp")
+	#~ updatedb("C:\\slair\\tmp")
+	updatedb("C:\\")
 
 
 if __name__=='__main__':
