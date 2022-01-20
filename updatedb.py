@@ -134,6 +134,10 @@ def get_type_id(fp_item, s=None):
 		try:
 			t = magic.from_file(fp_item)
 
+		except magic.magic.MagicException as e:
+			loge(str_obj(e))
+			t = "Error: magic exception"
+
 		except FileNotFoundError:
 			t = "cannot open %r"%fp_item
 
