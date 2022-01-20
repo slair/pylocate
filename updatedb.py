@@ -227,7 +227,7 @@ def updatedb(startpath):
 		if len(itemlist)==0:
 			continue
 
-		folder_id = get_folder_id(path)
+		folder_id = None	#get_folder_id(path)
 
 		for item in itemlist:
 
@@ -259,6 +259,9 @@ def updatedb(startpath):
 				else:
 					target = None
 					type_id = get_type_id(fp_item)
+
+				if folder_id is None:
+					folder_id = get_folder_id(path)
 
 				fsitem = FSItem(
 					folder_id	= folder_id,
@@ -296,7 +299,7 @@ def updatedb(startpath):
 	logd("Finished updating database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
 
-	clear_empty_folders(time.perf_counter(), session)
+	#~ clear_empty_folders(time.perf_counter(), session)
 	session.close()
 
 
@@ -363,6 +366,7 @@ def clear_nonexist_folders(t_start, session):
 	session.commit()
 	elapsed = time.perf_counter() - t_start
 	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	return deleted
 
 
 def clear_nonexist_files(t_start, session):
@@ -383,6 +387,7 @@ def clear_nonexist_files(t_start, session):
 	session.commit()
 	elapsed = time.perf_counter() - t_start
 	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	return deleted
 
 
 def clear_empty_folders(t_start, session):
@@ -400,6 +405,7 @@ def clear_empty_folders(t_start, session):
 	session.commit()
 	elapsed = time.perf_counter() - t_start
 	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	return deleted
 
 
 def cleardb():
@@ -411,9 +417,10 @@ def cleardb():
 
 	clear_nonexist_folders(time.perf_counter(), session)
 
-	clear_nonexist_files(time.perf_counter(), session)
+	deleted = clear_nonexist_files(time.perf_counter(), session)
 
-	clear_empty_folders(time.perf_counter(), session)
+	if deleted>0:
+		clear_empty_folders(time.perf_counter(), session)
 
 	session.close()
 
