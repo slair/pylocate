@@ -22,11 +22,15 @@ class CFG(object):
 	exclude_folders = []
 	_debug = _DEBUG
 	fn_database = "locate.db"
+	showpath_level = 3
+	type_use_magic = False
+	#~ delete_report_every = 10
+	check_report_every = 1000
 
 	def __new__(cls):
-		if not hasattr(cls, 'instance'):
-			cls.instance = super(CFG, cls).__new__(cls)
-		return cls.instance
+		if not hasattr(cls, '__instance'):
+			cls.__instance = super(CFG, cls).__new__(cls)
+		return cls.__instance
 
 	def __init__(self, *args, **keywords):
 		super(CFG, self).__init__()	# *args, **keywords
@@ -75,7 +79,7 @@ class CFG(object):
 		addr = "0x%016X"%id(self)
 		res="%s at %s {"%(self.__class__, addr)
 		for attr in dir(self):
-			if attr!="instance" and attr[0]!="_" \
+			if attr[0]!="_" \
 				and not callable(getattr(self, attr)):
 				res += "\n\t%s = %s"%(attr, getattr(self, attr))
 		res += "\n%s } at %s"%(self.__class__, addr)
@@ -114,7 +118,7 @@ cfg = CFG()
 #~ print(cfg)
 
 def main():
-	...
+	print(cfg)
 
 if __name__=='__main__':
 	main()

@@ -85,7 +85,7 @@ class FSItem(_Base):
 	#~ dtime		= Column(DateTime)					# deletion time
 	size		= Column(Integer, nullable=False)
 
-	type_id		= Column(Integer, ForeignKey("types.id"), nullable=False)
+	type_id		= Column(Integer, ForeignKey("types.id"), nullable=True)
 	type		= relationship("FSItemType",
 					backref=backref("fsitems", cascade="all,delete"))
 
@@ -128,7 +128,7 @@ def InitDB():
 	return session
 
 
-session = InitDB()
+#~ session = InitDB()
 
 def main():
 	fsitem = FSItemFolder()

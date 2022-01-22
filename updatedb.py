@@ -56,7 +56,7 @@ def load_obj(fn):
 		return json.load(handle)
 
 
-def fsitem_add_or_update(item):
+def fsitem_add_or_update(session, item):
 	cmp_attrs = ("size", "type_id", "description", "atime",
 		"mtime", "ctime", "inode", "dev", "nlink")
 
@@ -95,16 +95,16 @@ def fsitem_add_or_update(item):
 		return 1
 
 
-def logd_status(itemcount, changes, elapsed):
-	status = ("items = %r, speed = %.2f items/sec, " + \
+def logd_status(itemcount, changes, elapsed, last_commit_len):
+	status = ("(%s) items = %r, speed = %.2f items/sec, " + \
 		"changes = %r, speed = %.2f changes/sec")%(
-		itemcount, itemcount / elapsed,
+		last_commit_len, itemcount, itemcount / elapsed,
 		changes, changes / elapsed
 	)
 	logd(status)
 
 
-def get_folder_id(fp_item):
+def get_folder_id(session, fp_item):
 	try:
 		db_item = session.query(FSItemFolder).filter_by(
 			name=fp_item
@@ -128,28 +128,30 @@ def get_folder_id(fp_item):
 	return db_item.id
 
 
-def get_type_id(fp_item, s=None):
+def get_type_id(session, fp_item, s=None):
 
 	if s is None:
-		try:
-			t = magic.from_file(fp_item)
-
-		except magic.magic.MagicException as e:
-			loge(str_obj(e))
-			t = "Error: magic exception"
-
-		except FileNotFoundError:
-			t = "cannot open %r"%fp_item
-
-		except PermissionError as e:
-			t = "Error: permission denied"
-
-		if t.startswith("cannot open "):
+		t = "no magic"
+		if cfg.type_use_magic:
 			try:
-				t = magic.from_buffer(open(fp_item, "rb").read(1024))
+				t = magic.from_file(fp_item)
+
+			except magic.magic.MagicException as e:
+				#~ loge(str_obj(e))
+				t = "Error: magic exception"
+
 			except FileNotFoundError:
-				#~ t = "FileNotFoundError %r"%fp_item
-				t = "Error: file not found"
+				t = "cannot open %r"%fp_item
+
+			except PermissionError as e:
+				t = "Error: permission denied"
+
+			if t.startswith("cannot open "):
+				try:
+					t = magic.from_buffer(open(fp_item, "rb").read(1024))
+				except FileNotFoundError:
+					#~ t = "FileNotFoundError %r"%fp_item
+					t = "Error: file not found"
 	else:
 		t = s
 
@@ -163,8 +165,8 @@ def get_type_id(fp_item, s=None):
 		db_item = None
 
 	if db_item is None:
-		if len(session.new)>0:
-			logd("get_type_id:	%s %s", len(session.new), session.new)
+		#~ if len(session.new)>0:
+			#~ logd("get_type_id:	%s %s", len(session.new), session.new)
 		db_item = FSItemType(name=t)
 		session.add(db_item)
 		session.commit()
@@ -198,7 +200,7 @@ def get_description(fp_item):
 				#~ logd("fn=%s, d=%s", fn, d)
 
 			if fn==name:
-				logd("Description for '%s' found '%s'", name, d)
+				#~ logd("Description for '%s' found '%s'", name, d)
 				return d
 
 	return None
@@ -335,7 +337,6 @@ def NTFSreadlink(path):
 # win32 code end ===============================================================
 
 def updatedb(startpath):
-	global session
 
 	logd("Updating database '%s'", cfg.fn_database)
 
@@ -347,6 +348,7 @@ def updatedb(startpath):
 
 	itemcount = 0
 	changes = 0
+	last_commit_len = 0
 
 	t_start = time.perf_counter()
 
@@ -367,8 +369,8 @@ def updatedb(startpath):
 
 		except OSError as e:
 			if e.errno==13:
-				type_id = get_type_id(path, "Error: permission denied")
-				folder_id = get_folder_id(os.path.dirname(path))
+				type_id = get_type_id(session, path, "Error: permission denied")
+				folder_id = get_folder_id(session, os.path.dirname(path))
 
 				item_stat = os.stat(path, follow_symlinks=False)
 
@@ -388,8 +390,8 @@ def updatedb(startpath):
 					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
-				logd(fsitem)
-				changes += fsitem_add_or_update(fsitem)
+				#~ logd(fsitem)
+				changes += fsitem_add_or_update(session, fsitem)
 				continue
 
 			elif not e.errno in (22,):
@@ -398,20 +400,20 @@ def updatedb(startpath):
 				stop()
 
 		if dest:
-			logd("Link found: %s -> %s", path, dest)
+			loge("Link found: %s -> %s", path, dest)
 			stop(0)
 		else:
 			jp = isNTFSlink(path)
 			if jp:
-				loge("isNTFSlink('%s')=%s", path, jp)
+				#~ logd("isNTFSlink('%s')=%s", path, jp)
 				dest = NTFSreadlink(path)
-				type_id = get_type_id(path, "junction link")
+				type_id = get_type_id(session, path, "junction link")
 
 		if dest:
-			logd("Link found: %s -> %s", path, dest)
+			#~ logd("Link found: %s -> %s", path, dest)
 			target = dest
 
-			folder_id = get_folder_id(os.path.dirname(path))
+			folder_id = get_folder_id(session, os.path.dirname(path))
 
 			item_stat = os.stat(path, follow_symlinks=False)
 
@@ -431,8 +433,8 @@ def updatedb(startpath):
 				ctime		= datetime.fromtimestamp(item_stat.st_ctime)
 			)
 
-			logd(fsitem)
-			changes += fsitem_add_or_update(fsitem)
+			#~ logd(fsitem)
+			changes += fsitem_add_or_update(session, fsitem)
 			continue
 
 		try:
@@ -440,8 +442,9 @@ def updatedb(startpath):
 
 		except PermissionError as e:
 			if e.errno==13:
-				type_id = get_type_id(path, "Error: permission denied")
-				folder_id = get_folder_id(os.path.dirname(path))
+				logw("Permission denied: '%s'", path)
+				type_id = get_type_id(session, path, "Error: permission denied")
+				folder_id = get_folder_id(session, os.path.dirname(path))
 
 				item_stat = os.stat(path, follow_symlinks=False)
 
@@ -461,8 +464,8 @@ def updatedb(startpath):
 					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
-				logd(fsitem)
-				changes += fsitem_add_or_update(fsitem)
+				#~ logd(fsitem)
+				changes += fsitem_add_or_update(session, fsitem)
 				continue
 			else:
 				loge(path)
@@ -486,6 +489,11 @@ def updatedb(startpath):
 			continue
 
 		folder_id = None	#get_folder_id(path)
+
+		sep_count = path.count(os.sep)
+
+		if sep_count<=cfg.showpath_level:
+			logi("%7d %s ...", len(itemlist), path)
 
 		for item in itemlist:
 
@@ -513,13 +521,13 @@ def updatedb(startpath):
 
 				if stat.S_ISLNK(item_stat.st_mode):
 					target = os.readlink(fp_item)
-					type_id = get_type_id(fp_item, "symbolic link")
+					type_id = get_type_id(session, fp_item, "symbolic link")
 				else:
 					target = None
-					type_id = get_type_id(fp_item)
+					type_id = get_type_id(session, fp_item)
 
 				if folder_id is None:
-					folder_id = get_folder_id(path)
+					folder_id = get_folder_id(session, path)
 
 				fsitem = FSItem(
 					folder_id	= folder_id,
@@ -537,22 +545,26 @@ def updatedb(startpath):
 					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
-				changes += fsitem_add_or_update(fsitem)
+				changes += fsitem_add_or_update(session, fsitem)
 
 				if changes!=0 and changes % COMMIT_INTERVAL == 0:
 					if len(session.new)>0:
-						logd("updatedb:	%s %s", len(session.new), session.new)
+						#~ logd("updatedb:	%s %s",
+							#~ len(session.new), session.new)
+						last_commit_len = len(session.new)
 						session.commit()
 
 				if itemcount!=0 and itemcount % COMMIT_INTERVAL == 0:
 					elapsed = time.perf_counter() - t_start
-					logd_status(itemcount, changes, elapsed)
+					logd_status(itemcount, changes, elapsed, last_commit_len)
 
 			else:
 				logd(item_stat)
+				stop()
 
 	elapsed = time.perf_counter() - t_start
-	logd_status(itemcount, changes, elapsed)
+	last_commit_len = len(session.new)
+	logd_status(itemcount, changes, elapsed, last_commit_len)
 	session.commit()
 	logd("Finished updating database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
@@ -577,6 +589,10 @@ def parse_commandline(args):
 	ap.add_argument("-v", "--show-config", action="store_true", default=False,
 		dest="show_config", help="show config")
 
+	ap.add_argument("-m", "--type-use-magic", action="store_true",
+		default=False, dest="type_use_magic",
+		help="use magic python library to detect file type")
+
 	ap.add_argument("-s", "--save-config", action="store_true", default=False,
 		dest="save_config", help="save config changes to %s"%cfg.fn_config)
 
@@ -588,6 +604,8 @@ def parse_commandline(args):
 	if cfg.debug:
 		logger.setLevel(logging.DEBUG)
 
+	cfg.type_use_magic = ns.type_use_magic
+
 	if ns.exclude_folder is not None and len(ns.exclude_folder)>0:
 		cfg.exclude_folders.extend(ns.exclude_folder)
 
@@ -596,8 +614,6 @@ def parse_commandline(args):
 		os.unlink(cfg.fn_database)
 		print("Database '%s' deleted!" % cfg.fn_database)
 		sys.exit(0)
-
-	#~ logd(cfg)
 
 	if ns.show_config:
 		print(cfg)
@@ -609,30 +625,41 @@ def parse_commandline(args):
 		save_obj(dconfig, cfg.fn_config)
 
 
+def logd_checked_deleted(checked, deleted, elapsed):
+	logd("Checked %d, deleted %s items in %.2f sec"%(
+		checked, deleted, elapsed))
+
+
 def clear_nonexist_folders(t_start, session):
 	session.begin()
-	logd("Checking folders...")
+	logd("Quering folders...")
 	folders = session.query(FSItemFolder).all()
 	deleted = 0
 	checked = 0
+	logd("Checking %d folders...", len(folders))
 	for f in folders:
 		if not os.path.exists(f.name):
 			logd("Delete %s", f.name)
 			session.delete(f)
 			deleted += 1
 		checked += 1
+
+		if checked % cfg.check_report_every == 0:
+			logd_checked_deleted(checked, deleted,
+				time.perf_counter() - t_start)
+
 	session.commit()
-	elapsed = time.perf_counter() - t_start
-	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	logd_checked_deleted(checked, deleted, time.perf_counter() - t_start)
 	return deleted
 
 
 def clear_nonexist_files(t_start, session):
 	session.begin()
-	logd("Checking files...")
+	logd("Quering files...")
 	files = session.query(FSItem).all()
 	deleted = 0
 	checked = 0
+	logd("Checking %d files...", len(files))
 	for f in files:
 		folder = f.folder.name
 		name = f.name
@@ -642,32 +669,57 @@ def clear_nonexist_files(t_start, session):
 			session.delete(f)
 			deleted += 1
 		checked += 1
+
+		if checked % cfg.check_report_every == 0:
+			logd_checked_deleted(checked, deleted,
+				time.perf_counter() - t_start)
+
 	session.commit()
-	elapsed = time.perf_counter() - t_start
-	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	logd_checked_deleted(checked, deleted, time.perf_counter() - t_start)
+	return deleted
+
+
+def clear_types(t_start, session):
+	session.begin()
+	logd("Cleaning types...")
+	#~ dataset = session.query(FSItemType).all()
+	checked = 0
+	deleted = session.query(FSItemType).delete()
+	#~ for item in dataset:
+		#~ logd("%d %d Delete %s", len(dataset)-deleted, len(item.fsitems),
+			#~ item.name)
+		#~ session.delete(item)
+		#~ deleted += 1
+		#~ checked += 1
+	session.commit()
+	logd_checked_deleted(checked, deleted, time.perf_counter() - t_start)
 	return deleted
 
 
 def clear_empty_folders(t_start, session):
 	session.begin()
-	logd("Checking empty folders...")
+	logd("Quering empty folders...")
 	folders = session.query(FSItemFolder).all()
 	deleted = 0
 	checked = 0
+	logd("Checking empty %d folders...", len(folders))
 	for f in folders:
 		if len(f.fsitems)==0:
 			logd("Delete %s", f.name)
 			session.delete(f)
 			deleted += 1
 		checked += 1
+
+		if checked % cfg.check_report_every == 0:
+			logd_checked_deleted(checked, deleted,
+				time.perf_counter() - t_start)
+
 	session.commit()
-	elapsed = time.perf_counter() - t_start
-	logd("Checked %d, deleted %s items in %.2f sec"%(checked, deleted, elapsed))
+	logd_checked_deleted(checked, deleted, time.perf_counter() - t_start)
 	return deleted
 
 
 def cleardb():
-	global session
 	logd("Cleaning database '%s'", cfg.fn_database)
 	t_start = time.perf_counter()
 
@@ -694,9 +746,13 @@ def main():
 
 	parse_commandline(sys.argv)
 
-	cleardb()
-	#~ updatedb("C:\\slair\\tmp")
+	#~ session = InitDB()
+	#~ clear_types(time.perf_counter(), session)
+	#~ session.close()
+
+	#~ cleardb()
 	updatedb("C:\\")
+	#~ updatedb("C:\\slair\\tmp")
 
 
 if __name__=='__main__':
