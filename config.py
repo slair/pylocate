@@ -26,6 +26,7 @@ class CFG(object):
 	type_use_magic = False
 	#~ delete_report_every = 10
 	check_report_every = 1000
+	big_items_count_in_folder = 100
 
 	def __new__(cls):
 		if not hasattr(cls, '__instance'):

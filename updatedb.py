@@ -5,6 +5,9 @@ _DEBUG = True
 COMMIT_INTERVAL = 50
 
 import os, sys, string, stat, subprocess, time, json, argparse, logging
+
+win32 = sys.platform=="win32"
+linux = sys.platform=="linux"
 stop = sys.exit
 
 import tempfile
@@ -102,6 +105,8 @@ def logd_status(itemcount, changes, elapsed, last_commit_len):
 		changes, changes / elapsed
 	)
 	logd(status)
+	#~ if changes>100:
+		#~ stop()
 
 
 def get_folder_id(session, fp_item):
@@ -359,13 +364,11 @@ def updatedb(startpath):
 		#~ logd("os.path.ismount(path)=%s", os.path.ismount(path))
 		#~ logd("os.path.islink(path)=%s", os.path.islink(path))
 
-		dest = None
+		target = None
 		try:
-			dest = os.readlink(path)
+			target = os.readlink(path)
 		except ValueError as e:
 			pass
-			#~ loge(path)
-			#~ loge(str_obj(e))
 
 		except OSError as e:
 			if e.errno==13:
@@ -399,19 +402,16 @@ def updatedb(startpath):
 				loge(str_obj(e))
 				stop()
 
-		if dest:
-			loge("Link found: %s -> %s", path, dest)
-			stop(0)
-		else:
+		if target is None:
 			jp = isNTFSlink(path)
 			if jp:
-				#~ logd("isNTFSlink('%s')=%s", path, jp)
-				dest = NTFSreadlink(path)
+				target = NTFSreadlink(path)
 				type_id = get_type_id(session, path, "junction link")
+		else:
+			loge("Link found: %s -> %s", path, target)
+			stop(0)
 
-		if dest:
-			#~ logd("Link found: %s -> %s", path, dest)
-			target = dest
+		if target:
 
 			folder_id = get_folder_id(session, os.path.dirname(path))
 
@@ -493,7 +493,8 @@ def updatedb(startpath):
 		sep_count = path.count(os.sep)
 
 		if sep_count<=cfg.showpath_level:
-			logi("%7d %s ...", len(itemlist), path)
+			if len(itemlist)>cfg.big_items_count_in_folder:
+				logi("%7d %s ...", len(itemlist), path)
 
 		for item in itemlist:
 
@@ -600,6 +601,8 @@ def parse_commandline(args):
 
 	#~ logd(ns)
 
+	need_exit = False
+
 	cfg.debug = ns.debug
 	if cfg.debug:
 		logger.setLevel(logging.DEBUG)
@@ -608,15 +611,18 @@ def parse_commandline(args):
 
 	if ns.exclude_folder is not None and len(ns.exclude_folder)>0:
 		cfg.exclude_folders.extend(ns.exclude_folder)
+		#~ for f in ns.exclude_folder:
+			#~ cfg.exclude_folders.append(envvar2path(f))
 
 	if ns.recreate:
 		logd("Deleting database: '%s'", cfg.fn_database)
 		os.unlink(cfg.fn_database)
 		print("Database '%s' deleted!" % cfg.fn_database)
-		sys.exit(0)
+		need_exit = True
 
 	if ns.show_config:
 		print(cfg)
+		need_exit = True
 
 	if ns.save_config:
 		dconfig = dict(
@@ -624,6 +630,14 @@ def parse_commandline(args):
 		)
 		save_obj(dconfig, cfg.fn_config)
 
+	#~ cfg.exclude_folders = list(map(envvar2path, cfg.exclude_folders))
+	#~ print(cfg)
+
+	if need_exit:
+		sys.exit(0)
+
+	cfg.exclude_folders = list(map(envvar2path, cfg.exclude_folders))
+	#~ print(cfg)
 
 def logd_checked_deleted(checked, deleted, elapsed):
 	logd("Checked %d, deleted %s items in %.2f sec"%(
@@ -738,6 +752,33 @@ def cleardb():
 	logd("Finished cleaning database '%s' in %.2f sec",
 		cfg.fn_database, elapsed)
 
+
+def envvar2path(ev):
+	if ev[0]=="%":
+		# win32
+		if ev[-1]=="%":
+			varname = ev[1:-1]
+		else:
+			varname = ev[1:]
+		if varname in os.environ:
+			return os.environ[varname]
+
+		else:
+			return ev
+
+	elif ev[0]=="$":
+		# linux
+		varname = ev[1:]
+		if varname in os.environ:
+			return os.environ[varname]
+
+		else:
+			return ev
+
+	else:
+		return ev
+
+
 def main():
 
 	if os.path.exists(cfg.fn_config):
@@ -757,3 +798,7 @@ def main():
 
 if __name__=='__main__':
 	main()
+	#~ for item in ("%SystemRoot%", "$SystemRoot", "$HOME", "$HOME111", "%home%",
+				#~ "%USERPROFILE%", "$USERPROFILE", "%USERPROFILE",
+				#~ "$USERPROFILE", "$USER$PROFILE", "%%USERPROFILE"):
+		#~ print("'%s' = '%s'"%(item, envvar2path(item)))

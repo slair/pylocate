@@ -26,6 +26,24 @@ fn_database = cfg.fn_database
 
 _Base = declarative_base()
 
+class FSItemType(_Base):
+	__tablename__ = "types"
+
+	id			= Column(Integer, primary_key = True, nullable=False)
+	name		= Column(String, nullable=False, unique=True)
+	#~ files		= relationship('FSItem', backref='type', lazy='dynamic')
+
+	def __str__(self):
+		res="%s {"%(self.__class__)
+		for attr in dir(self):
+			if not attr[0]=="_" and not callable(getattr(self, attr)):
+				res += "\n\t%s = %s"%(attr, getattr(self, attr))
+		res += "\n%s }"%(self.__class__)
+		return res
+
+# end FSItemType class ===
+
+
 class FSItemFolder(_Base):		# folder have inode (renaming!!)
 	__tablename__ = "folders"
 
@@ -47,24 +65,6 @@ class FSItemFolder(_Base):		# folder have inode (renaming!!)
 # end FSItemFolder class ===
 
 
-class FSItemType(_Base):
-	__tablename__ = "types"
-
-	id			= Column(Integer, primary_key = True, nullable=False)
-	name		= Column(String, nullable=False, unique=True)
-	#~ files		= relationship('FSItem', backref='type', lazy='dynamic')
-
-	def __str__(self):
-		res="%s {"%(self.__class__)
-		for attr in dir(self):
-			if not attr[0]=="_" and not callable(getattr(self, attr)):
-				res += "\n\t%s = %s"%(attr, getattr(self, attr))
-		res += "\n%s }"%(self.__class__)
-		return res
-
-# end FSItemType class ===
-
-
 class FSItem(_Base):
 	__tablename__ = "fsitems"
 
@@ -73,7 +73,6 @@ class FSItem(_Base):
 	folder_id	= Column(Integer,
 					ForeignKey(FSItemFolder.id, ondelete="CASCADE"),
 					nullable=False)
-	#~ folder		= relationship("FSItemFolder", back_populates="files")
 	folder		= relationship(FSItemFolder,
 					backref=backref("fsitems", cascade="all,delete"))
 
