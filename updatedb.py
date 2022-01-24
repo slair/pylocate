@@ -15,6 +15,8 @@ from datetime import datetime
 
 from dbgtools import str_obj
 
+from cpp import fast_updatedb
+
 try:
 	_DEBUG
 except NameError:
@@ -792,7 +794,10 @@ def main():
 	#~ session.close()
 
 	#~ cleardb()
-	updatedb("C:\\")
+	t_start = time.perf_counter()
+	#~ updatedb("C:\\")
+	fast_updatedb("C:\\")
+	logd("elapsed %.9f", time.perf_counter() - t_start)
 	#~ updatedb("C:\\slair\\tmp")
 
 
