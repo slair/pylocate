@@ -25,6 +25,7 @@ int traverse( const char* start_folder )
 
 		se = entry->toStdString();
 		std::cout << entry->toStdString() << std::endl;
+		// std::cout << qPrintable(*entry) << std::endl;
 
 		// qDebug().nospace() << qPrintable(*entry);
     }

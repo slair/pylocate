@@ -45,6 +45,9 @@ class CFG(object):
 			env_HOME = os.environ["HOME"]
 		elif "HOMEDRIVE" in os.environ and "HOMEPATH" in os.environ:
 			env_HOME = os.environ["HOMEDRIVE"] + os.environ["HOMEPATH"]
+		else:
+			env_HOME = None
+
 
 		if "XDG_DATA_HOME" in os.environ:
 			self._xdg_data_home = os.environ["XDG_DATA_HOME"]

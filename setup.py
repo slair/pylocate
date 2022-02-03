@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+print("Начинаем сборку")
+
 from distutils.core import setup, Extension
 
 module1 = Extension(
@@ -18,3 +20,4 @@ setup (name = "FastUpdateDB",
 	   version = "1.0",
 	   description = "Update DB with C++ and Qt5",
 	   ext_modules = [module1])
+

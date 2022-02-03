@@ -796,7 +796,7 @@ def main():
 	#~ cleardb()
 	t_start = time.perf_counter()
 	#~ updatedb("C:\\")
-	fast_updatedb("C:\\")
+	fast_updatedb("C:\\", cfg)
 	logd("elapsed %.9f", time.perf_counter() - t_start)
 	#~ updatedb("C:\\slair\\tmp")
 
