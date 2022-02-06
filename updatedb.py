@@ -790,9 +790,9 @@ def main():
 
 	parse_commandline(sys.argv)
 
-	#~ session = InitDB()
+	session = InitDB()
 	#~ clear_types(time.perf_counter(), session)
-	#~ session.close()
+	session.close()
 
 	#~ cleardb()
 	t_start = time.perf_counter()

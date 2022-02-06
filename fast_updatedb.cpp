@@ -29,6 +29,10 @@ int traverse( const char* start_folder )
 			QDir::System|QDir::NoDotAndDotDot );
 
 		QFileInfoList entries = currentDir.entryInfoList();
+		if (entries.isEmpty()) continue;
+
+		QFileInfo currentDir_Info = QFileInfo(currentDir, QDir::separator());
+
 		for( QFileInfoList::ConstIterator entry=entries.begin();
 				entry!=entries.end(); entry++) {
 			QString it;
@@ -71,6 +75,8 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args) {
 
 	if (!PyArg_ParseTuple(args, "sO", &start_folder, &cfgObj))
         return NULL;
+
+	// todo: get cfg.debug flag
 
 	PyObject* ef_pylistObj = PyObject_GetAttrString(cfgObj, "exclude_folders");
 	Py_ssize_t ef_size = PyList_Size(ef_pylistObj);
