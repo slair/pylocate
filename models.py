@@ -49,6 +49,7 @@ class FSItemFolder(_Base):		# folder have inode (renaming!!)
 
 	id			= Column(Integer, primary_key = True, nullable=False)
 	name		= Column(String, nullable=False, unique=True)
+	dev			= Column(Integer, nullable=False)
 	description	= Column(String)
 	#~ files		= relationship("FSItem", lazy='dynamic',
 					#~ cascade="all, delete-orphan", backref="folder",

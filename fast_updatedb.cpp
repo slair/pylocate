@@ -7,10 +7,22 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QSql>
+
+PyObject*	obj_cfg;
+QStringList	cfg_exclude_folders;
+bool		cfg_debug;
+QString		cfg_fn_database;
 
 
-PyObject* cfgObj;
-QStringList cfg_exclude_folders;
+//~ long get_folder_id(session, const QFileInfo* folder_Info)
+//~ {
+//~ struct stat stat1, stat2;
+//~ QFileInfo fi1(path1), fi2(path2),
+//~ stat(fi1.absoluteDir().absolutePath().toUtf8().constData(), &stat1);
+//~ stat(fi2.absoluteDir().absolutePath().toUtf8().constData(), &stat2);
+//~ return stat1.st_dev == stat2.st_dev;
+//~ }
 
 
 int traverse( const char* start_folder )
@@ -20,22 +32,28 @@ int traverse( const char* start_folder )
 	QStringList paths;
 	paths << start_folder;
 
+	// get session for sqlite
+
 	while (!paths.isEmpty()) {
 
 		QDir currentDir = paths.constFirst();
 		paths.removeFirst();
 
 		currentDir.setFilter( QDir::AllDirs|QDir::AllEntries|QDir::Hidden|
-			QDir::System|QDir::NoDotAndDotDot );
+							  QDir::System|QDir::NoDotAndDotDot );
 
 		QFileInfoList entries = currentDir.entryInfoList();
+
 		if (entries.isEmpty()) continue;
 
 		QFileInfo currentDir_Info = QFileInfo(currentDir, QDir::separator());
 
+		// todo: folder_id = get_folder_id(session, currentDir_Info)
+
 		for( QFileInfoList::ConstIterator entry=entries.begin();
-				entry!=entries.end(); entry++) {
+			 entry!=entries.end(); entry++) {
 			QString it;
+
 			if (entry->isFile()) {
 				it = "file ";
 			} else if (entry->isJunction()) {
@@ -45,49 +63,77 @@ int traverse( const char* start_folder )
 			} else if (entry->isDir()) {
 				it = "dir ";
 				QString new_dir = QDir::toNativeSeparators(
-									QDir::cleanPath(
-										currentDir.absolutePath() +
-										QDir::separator() +
-										entry->fileName()
-									));
+									  QDir::cleanPath(
+										  currentDir.absolutePath() +
+										  QDir::separator() +
+										  entry->fileName()
+									  ));
+
 				if (!cfg_exclude_folders.contains(new_dir)) {
 					//~ paths << new_dir;
 				} else {
+					// todo: check cfg.debug
 					std::cout << "Folder '" <<
-						new_dir.toStdString() << "' excluded by config" <<
-						std::endl;
+							  new_dir.toStdString() << "' excluded by config" <<
+							  std::endl;
 				}
 			} else {
 			}
+
 			std::cout << it.toStdString() <<
-				entry->fileName().toStdString() << std::endl;
+					  entry->fileName().toStdString() << std::endl;
 		}
 	}
-    return 0;
+
+	return 0;
 }
 
 
-static PyObject* updatedb_impl(PyObject* self, PyObject* args) {
-
+static PyObject* updatedb_impl(PyObject* self, PyObject* args)
+{
 	const char* start_folder;
 
-	// std::cout << "updatedb_impl:" << std::endl;
+	if (!PyArg_ParseTuple(args, "sO", &start_folder, &obj_cfg)) {
+		qDebug() << "FAILURE! "
+				 "PyArg_ParseTuple(args, ""sO"", &start_folder, &obj_cfg)";
+		return NULL;
+	}
 
-	if (!PyArg_ParseTuple(args, "sO", &start_folder, &cfgObj))
-        return NULL;
+	// get cfg.debug flag
+	PyObject* obj_cfg_debug = PyObject_GetAttrString(obj_cfg, "debug");
+	int int_ocd = PyObject_IsTrue(obj_cfg_debug);
+	if (int_ocd==0) {
+		cfg_debug = false;
+	} else if (int_ocd==1) {
+		cfg_debug = true;
+	} else {
+		qDebug() << "FAILURE! int_ocd =" << int_ocd;
+	}
+	if (cfg_debug) {
+		qDebug() << "cfg_debug =" << cfg_debug;
+	}
 
-	// todo: get cfg.debug flag
+	// get cfg.fn_database
+	PyObject* obj_cfg_fn_database = PyObject_GetAttrString(obj_cfg,
+									"fn_database");
+	cfg_fn_database = PyUnicode_AsUTF8(obj_cfg_fn_database);
+	if (cfg_debug) {
+		qDebug() << "cfg_fn_database =" << cfg_fn_database;
+	}
 
-	PyObject* ef_pylistObj = PyObject_GetAttrString(cfgObj, "exclude_folders");
-	Py_ssize_t ef_size = PyList_Size(ef_pylistObj);
-
+	// get cfg.exclude_folders
+	PyObject* obj_cfg_exclude_folders = PyObject_GetAttrString(obj_cfg,
+										"exclude_folders");
+	Py_ssize_t ef_size = PyList_Size(obj_cfg_exclude_folders);
 	for(Py_ssize_t i=0; i<ef_size; i++) {
-		PyObject* ef_pystr = PyList_GetItem(ef_pylistObj, i);
+		PyObject* ef_pystr = PyList_GetItem(obj_cfg_exclude_folders, i);
 		const char *c_str = PyUnicode_AsUTF8(ef_pystr);
 		QString out = QString(c_str);
 		cfg_exclude_folders << QDir::toNativeSeparators(QDir::cleanPath(out));
 	}
-	qDebug() << "cfg_exclude_folders =" << cfg_exclude_folders;
+	if (cfg_debug) {
+		qDebug() << "cfg_exclude_folders =" << cfg_exclude_folders;
+	}
 
 	traverse(start_folder);
 
@@ -96,20 +142,21 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args) {
 
 
 static PyMethodDef CPPMethods[] = {
-    {"fast_updatedb",  updatedb_impl, METH_VARARGS, "Update DB"},
-    {NULL, NULL, 0, NULL}	/* Страж */
+	{"fast_updatedb",  updatedb_impl, METH_VARARGS, "Update DB"},
+	{NULL, NULL, 0, NULL}	/* Страж */
 };
 
 static struct PyModuleDef cppmodule = {
-    PyModuleDef_HEAD_INIT,
-    "cpp",	/* имя модуля */
-    NULL,	/* документация модуля, может иметь значение NULL */
-    -1,		/* размер состояния модуля для каждого интерпретатора,
+	PyModuleDef_HEAD_INIT,
+	"_fudb",	/* имя модуля */
+	NULL,	/* документация модуля, может иметь значение NULL */
+	-1,		/* размер состояния модуля для каждого интерпретатора,
 				или -1, если
 				модуль сохраняет состояние в глобальных переменных. */
-    CPPMethods
+	CPPMethods
 };
 
-PyMODINIT_FUNC PyInit_cpp(void) {	// cppcheck: disable=unusedFunction
-    return PyModule_Create(&cppmodule);
+PyMODINIT_FUNC PyInit__fudb(void)  	// cppcheck: disable=unusedFunction
+{
+	return PyModule_Create(&cppmodule);
 }

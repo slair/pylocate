@@ -16,7 +16,7 @@ from datetime import datetime
 from dbgtools import str_obj
 
 sys.path.append("build\lib.win-amd64-3.7")
-from cpp import fast_updatedb
+from _fudb import fast_updatedb
 
 try:
 	_DEBUG
