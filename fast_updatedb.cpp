@@ -5,9 +5,15 @@
 
 #include <iostream>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+
 #include <QSql>
+#include <QSqlError>
+#include <QSqlDatabase>
+
+#include "sqlitedriver.h"
 
 PyObject*	obj_cfg;
 QStringList	cfg_exclude_folders;
@@ -32,7 +38,15 @@ int traverse( const char* start_folder )
 	QStringList paths;
 	paths << start_folder;
 
-	// get session for sqlite
+	// todo: get session for sqlite
+	SQLiteDriver* driver = new SQLiteDriver();
+	qDebug() << QSqlDatabase::drivers( );
+	QSqlDatabase db = QSqlDatabase::addDatabase(driver);
+	db.setDatabaseName(cfg_fn_database);
+	if (!db.open()) {
+		qDebug() << "FAILURE! db.open() "<< db.lastError().text();
+		return NULL;
+	}
 
 	while (!paths.isEmpty()) {
 
@@ -72,10 +86,12 @@ int traverse( const char* start_folder )
 				if (!cfg_exclude_folders.contains(new_dir)) {
 					//~ paths << new_dir;
 				} else {
-					// todo: check cfg.debug
-					std::cout << "Folder '" <<
-							  new_dir.toStdString() << "' excluded by config" <<
-							  std::endl;
+					if (cfg_debug) {
+						std::cout << "Folder '" <<
+								  new_dir.toStdString() <<
+								  "' excluded by config" <<
+								  std::endl;
+					}
 				}
 			} else {
 			}
@@ -84,10 +100,12 @@ int traverse( const char* start_folder )
 					  entry->fileName().toStdString() << std::endl;
 		}
 	}
-
 	return 0;
 }
 
+int argc = 0;
+char* argv[1];
+QCoreApplication app(argc, argv);
 
 static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 {
@@ -142,7 +160,7 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 
 
 static PyMethodDef CPPMethods[] = {
-	{"fast_updatedb",  updatedb_impl, METH_VARARGS, "Update DB"},
+	{"fast_updatedb",  updatedb_impl, METH_VARARGS, "__doc__:Update DB"},
 	{NULL, NULL, 0, NULL}	/* Страж */
 };
 
