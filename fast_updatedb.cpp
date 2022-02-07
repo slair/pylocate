@@ -5,13 +5,28 @@
 
 #include <iostream>
 
+#ifdef MS_WINDOWS
+#include <windows.h>
+//~ #include <pathcch.h>
+#endif
+
 #include <QCoreApplication>
 #include <QDebug>
+void myMessageOutput(QtMsgType type,
+					 const QMessageLogContext &context, const QString &msg)
+{
+	QTextStream cout(stdout, QIODevice::WriteOnly);
+	cout << msg << Qt::endl;
+}
+
 #include <QDir>
 
 #include <QSql>
 #include <QSqlError>
 #include <QSqlDatabase>
+
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "sqlitedriver.h"
 
@@ -21,94 +36,152 @@ bool		cfg_debug;
 QString		cfg_fn_database;
 
 
-//~ long get_folder_id(session, const QFileInfo* folder_Info)
-//~ {
-//~ struct stat stat1, stat2;
-//~ QFileInfo fi1(path1), fi2(path2),
-//~ stat(fi1.absoluteDir().absolutePath().toUtf8().constData(), &stat1);
-//~ stat(fi2.absoluteDir().absolutePath().toUtf8().constData(), &stat2);
-//~ return stat1.st_dev == stat2.st_dev;
-//~ }
+int get_folder_id(const QFileInfo* folder_Info)
+{
+	int res = -1;
+
+	//~ struct _stat folder_stat;
+	QString folder_fullpath = QDir::toNativeSeparators(
+								  folder_Info->absoluteDir().absolutePath());
+	int st_dev = 0;
+
+	//~ _stat(folder_fullpath.toUtf8().constData(), &folder_stat);
+
+#if defined(MS_WINDOWS)
+	const wchar_t *path = (const wchar_t *)folder_fullpath.utf16();
+	HANDLE hFile;
+	BY_HANDLE_FILE_INFORMATION fileInfo;
+	hFile = CreateFileW(
+				path,
+				FILE_READ_ATTRIBUTES,
+				0,
+				NULL,
+				OPEN_EXISTING,
+				FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
+				NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		qDebug() << "FAILURE! INVALID_HANDLE_VALUE";
+	} else {
+		if (!GetFileInformationByHandle(hFile, &fileInfo)) {
+			qDebug() << "FAILURE! GetFileInformationByHandle(hFile, &fileInfo)";
+		}
+	}
+	CloseHandle(hFile);
+	st_dev = fileInfo.dwVolumeSerialNumber;
+	//~ qDebug() << folder_fullpath << "st_dev =" <<
+	//~ fileInfo.dwVolumeSerialNumber;
+#endif
+	return res;
+}
 
 
 int traverse( const char* start_folder )
 {
-	std::cout << "start_folder = " << start_folder << std::endl;
+	if (cfg_debug) {
+		qDebug() << "! start_folder = " << start_folder;
+	}
 
 	QStringList paths;
 	paths << start_folder;
 
-	// todo: get session for sqlite
+	// get db for sqlite
 	SQLiteDriver* driver = new SQLiteDriver();
-	qDebug() << QSqlDatabase::drivers( );
 	QSqlDatabase db = QSqlDatabase::addDatabase(driver);
 	db.setDatabaseName(cfg_fn_database);
 	if (!db.open()) {
 		qDebug() << "FAILURE! db.open() "<< db.lastError().text();
 		return NULL;
+	} else {
+		if (cfg_debug) {
+			qDebug() << "db opened";
+		}
 	}
 
-	while (!paths.isEmpty()) {
 
-		QDir currentDir = paths.constFirst();
+	while (!paths.isEmpty()) {
+		int levelrec;
+
+		QString current_dir = paths.constFirst();
+
+		levelrec = current_dir.count(QDir::separator());
+		if (cfg_debug) {
+			qDebug() << "current_dir =" << current_dir;
+			//~ qDebug() << "QDir::separator() =" << QDir::separator();
+			qDebug() << "levelrec =" << levelrec;
+		}
+		if (levelrec>1) {
+			qDebug() << "paths.size() =" << paths.size();
+			break;
+		}
+
 		paths.removeFirst();
 
-		currentDir.setFilter( QDir::AllDirs|QDir::AllEntries|QDir::Hidden|
-							  QDir::System|QDir::NoDotAndDotDot );
-
-		QFileInfoList entries = currentDir.entryInfoList();
+		QDir Dir_current = current_dir;
+		Dir_current.setFilter( QDir::AllDirs|QDir::AllEntries|QDir::Hidden|
+							   QDir::System|QDir::NoDotAndDotDot );
+		QFileInfoList entries = Dir_current.entryInfoList();
 
 		if (entries.isEmpty()) continue;
 
-		QFileInfo currentDir_Info = QFileInfo(currentDir, QDir::separator());
+		QFileInfo Dir_current_Info = QFileInfo(Dir_current, QDir::separator());
 
-		// todo: folder_id = get_folder_id(session, currentDir_Info)
+		int folder_id = get_folder_id(&Dir_current_Info);
 
+		QString it;
 		for( QFileInfoList::ConstIterator entry=entries.begin();
 			 entry!=entries.end(); entry++) {
-			QString it;
 
 			if (entry->isFile()) {
-				it = "file ";
+				it = "file";
 			} else if (entry->isJunction()) {
-				it = "junction ";
+				it = "junction";
 			} else if (entry->isSymbolicLink()) {
-				it = "symboliclink ";
+				it = "symboliclink";
 			} else if (entry->isDir()) {
-				it = "dir ";
+				it = "";
 				QString new_dir = QDir::toNativeSeparators(
 									  QDir::cleanPath(
-										  currentDir.absolutePath() +
+										  Dir_current.absolutePath() +
 										  QDir::separator() +
 										  entry->fileName()
 									  ));
 
 				if (!cfg_exclude_folders.contains(new_dir)) {
-					//~ paths << new_dir;
+					paths << new_dir;
 				} else {
 					if (cfg_debug) {
-						std::cout << "Folder '" <<
-								  new_dir.toStdString() <<
-								  "' excluded by config" <<
-								  std::endl;
+						qDebug() << "Folder" <<
+								 new_dir <<
+								 "excluded by config";
 					}
 				}
 			} else {
+				it = "unknown";
 			}
 
-			std::cout << it.toStdString() <<
-					  entry->fileName().toStdString() << std::endl;
+			if (it!="") {
+				qDebug().noquote() << it <<
+								   entry->fileName();
+			}
 		}
 	}
-	return 0;
+	if (db.isOpen()) {
+		db.close();
+		if (cfg_debug) {
+			qDebug() << "db closed";
+		}
+	}
+	return 1;
 }
 
-int argc = 0;
-char* argv[1];
-QCoreApplication app(argc, argv);
+//~ int argc = 0;
+//~ char* argv[1];
+//~ QCoreApplication app(argc, argv);
 
 static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 {
+	qInstallMessageHandler(myMessageOutput);
+
 	const char* start_folder;
 
 	if (!PyArg_ParseTuple(args, "sO", &start_folder, &obj_cfg)) {
@@ -153,7 +226,11 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 		qDebug() << "cfg_exclude_folders =" << cfg_exclude_folders;
 	}
 
-	traverse(start_folder);
+	int r = traverse(start_folder);
+
+	if (cfg_debug) {
+		qDebug() << "r =" << r;
+	}
 
 	Py_RETURN_NONE;
 }

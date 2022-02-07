@@ -5,7 +5,7 @@ import sys
 
 from io866 import print866
 
-print866("< Начинаем сборку >")
+print866("<        Начинаем сборку        >")
 
 from distutils.core import setup, Extension
 
@@ -27,13 +27,13 @@ module_fastupdatedb = Extension(
 	libraries = ["Qt5Core", "Qt5Sql"],
 	library_dirs = ["C:\\apps\\qt\\lib"],
 	sources = [
+		"fast_updatedb.cpp",
 		"3rdparty\\sqlite\\sqlite3.c",
 		"3rdparty\\sqlitex\\sqlitedriver.cpp",
 		"3rdparty\\sqlitex\\moc_sqlitedriver.cpp",
 		"3rdparty\\sqlitex\\sqliteextension.cpp",
 		"3rdparty\\sqlitex\\sqlcachedresult.cpp",
 		"3rdparty\\qupzilla\\qzregexp.cpp",
-		"fast_updatedb.cpp",
 	])
 
 setup (name = "FastUpdateDB",

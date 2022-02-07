@@ -796,10 +796,14 @@ def main():
 
 	#~ cleardb()
 	t_start = time.perf_counter()
+
 	#~ updatedb("C:\\")
+	#~ print(os.stat("c:", follow_symlinks=False))
+	#~ print(os.stat("c:\\", follow_symlinks=False))
+	#~ sys.stdout.flush()
 	fast_updatedb("C:\\", cfg)
+
 	logd("elapsed %.9f", time.perf_counter() - t_start)
-	#~ updatedb("C:\\slair\\tmp")
 
 
 if __name__=='__main__':
