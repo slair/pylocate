@@ -14,7 +14,7 @@ module_fastupdatedb = Extension(
 	define_macros = [
 		("MAJOR_VERSION", "1"),
 		("MINOR_VERSION", "0"),
-		("HAVE_QT5", ""),
+		("HAVE_QT5", "1"),
 	],
 	include_dirs = [
 		"C:\\apps\\qt\\include",
