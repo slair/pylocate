@@ -34,7 +34,10 @@ module_fastupdatedb = Extension(
 		"3rdparty\\sqlitex\\sqliteextension.cpp",
 		"3rdparty\\sqlitex\\sqlcachedresult.cpp",
 		"3rdparty\\qupzilla\\qzregexp.cpp",
-	])
+	],
+	extra_compile_args = ["/Yc"],
+	extra_link_args = [],
+	)
 
 setup (name = "FastUpdateDB",
 	   version = "1.0",

@@ -41,9 +41,39 @@ SQLiteDriver* driver = new SQLiteDriver();
 QSqlDatabase db = QSqlDatabase::addDatabase(driver);
 
 
-int get_type_id(QFileInfoList::ConstIterator entry, QString* type)
+int get_type_id(QFileInfoList::ConstIterator entry, const QString* type)
 {
+	QSqlQuery q;
 	int res = -1;
+	if (type->isEmpty()) {
+		if (cfg_type_use_magic) {
+			// todo: use magic to determine file type
+		} else {
+			// todo: somehow determine file type
+		}
+	} else {
+		// todo: search id of type
+		QString query_string = QString("SELECT id FROM types WHERE "
+									   "name='%1'").arg(*type);
+		//~ qDebug() << query_string;
+		q.exec(query_string);
+
+		if (q.next()) {
+			res = q.value(0).toInt();
+			//~ qDebug() << "select" << res;
+		} else {
+			q.prepare("INSERT INTO types(name) VALUES (:name)");
+			q.bindValue(":name", *type);
+			q.exec();
+			db.commit();
+			q.exec(QString("SELECT id FROM types WHERE name='%1'")
+				   .arg(*type));
+			if (q.next()) {
+				res = q.value(0).toInt();
+				//~ qDebug() << "select after insert" << res;
+			}
+		}
+	}
 	return res;
 }
 
@@ -51,10 +81,8 @@ int get_type_id(QFileInfoList::ConstIterator entry, QString* type)
 int get_folder_id(const QString* folder)
 {
 	int res = -1;
-
 	//~ struct _stat folder_stat;
 	//~ QString folder_fullpath = folder;
-	qDebug() << "! folder_fullpath = " << folder;
 	unsigned int st_dev = 0;
 
 	//~ _stat(folder_fullpath.toUtf8().constData(), &folder_stat);
@@ -72,10 +100,11 @@ int get_folder_id(const QString* folder)
 				FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
 				NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
-		qDebug() << "FAILURE! INVALID_HANDLE_VALUE";
+		qDebug() << "! FAILURE! INVALID_HANDLE_VALUE";
 	} else {
 		if (!GetFileInformationByHandle(hFile, &fileInfo)) {
-			qDebug() << "FAILURE! GetFileInformationByHandle(hFile, &fileInfo)";
+			qDebug() << "! FAILURE GetFileInformationByHandle("
+					 "hFile, &fileInfo)";
 		}
 	}
 	CloseHandle(hFile);
@@ -84,24 +113,29 @@ int get_folder_id(const QString* folder)
 #endif /* MS_WINDOWS */
 
 	QSqlQuery q;
-	QString query_string = QString("SELECT id FROM folders WHERE name='%1' and dev=%2").arg(*folder).arg(st_dev);
-	qDebug() << query_string;
+	QString query_string = QString("SELECT id FROM folders WHERE name='%1' "
+								   "and dev=%2").arg(*folder).arg(st_dev);
+	//~ qDebug() << query_string;
 	q.exec(query_string);
 
 	if (q.next()) {
 		res = q.value(0).toInt();
-		qDebug() << "select" << res;
+		//~ qDebug() << "select" << res;
 	} else {
 		q.prepare("INSERT INTO folders(name, dev) VALUES (:name, :dev)");
 		q.bindValue(":name", *folder);
 		q.bindValue(":dev", st_dev);
 		q.exec();
 		db.commit();
-		q.exec(QString("SELECT id FROM folders WHERE name='%1' and dev=%2").arg(*folder).arg(st_dev));
+		q.exec(QString("SELECT id FROM folders WHERE name='%1' and "
+					   "dev=%2").arg(*folder).arg(st_dev));
 		if (q.next()) {
 			res = q.value(0).toInt();
-			qDebug() << "select after insert" << res;
+			//~ qDebug() << "select after insert" << res;
 		}
+	}
+	if (cfg_debug) {
+		qDebug() << "int get_folder_id(" << *folder << ") = " << res;
 	}
 	return res;
 }
@@ -143,7 +177,7 @@ QString NTFSreadlink(QFileInfoList::ConstIterator entry)
 #endif /* MS_WINDOWS */
 
 void add_or_update_fsitem(const int folder_id,
-						  const int type_id,
+						  const int type_id,	// -1 сами придумаем via magic
 						  const QString* target,
 						  QFileInfoList::ConstIterator entry,
 						  const QDateTime* dt_scan
@@ -156,18 +190,22 @@ void add_or_update_fsitem(const int folder_id,
 		my_type_id = type_id;
 	}
 	QSqlQuery q;
-	QString query_string = QString("SELECT id, inode, nlink, dev, size, type_id, target, description, atime, mtime, ctime FROM fsitems WHERE folder_id=%1 and name='%2'").arg(folder_id).arg(entry->fileName());
-	qDebug() << query_string;
+	QString query_string = QString("SELECT id, inode, nlink, dev, size, "
+								   "type_id, target, description, atime, "
+								   "mtime, ctime FROM fsitems WHERE "
+								   "folder_id=%1 and name='%2'")
+						   .arg(folder_id).arg(entry->fileName());
+	//~ qDebug() << query_string;
 	q.exec(query_string);
 	if (q.next()) {
 		// todo: check
-		qDebug() << "check";
+		qDebug() << "! check";
 		int id = q.value(0).toInt();
 		// todo: update
-		qDebug() << "update";
+		qDebug() << "! update";
 	} else {
 		// todo: insert new record
-		qDebug() << "insert";
+		qDebug() << "! insert";
 		q.prepare("INSERT INTO fsitems(folder_id, name, inode, nlink, dev, "
 				  "stime, size, type_id, target, description, atime, mtime, "
 				  "ctime) VALUES (:inode, :nlink, :dev, :stime, :size, "
@@ -238,8 +276,8 @@ int traverse( const char* start_folder )
 
 		levelrec = current_dir.count(QDir::separator());
 		if (cfg_debug) {
-			qDebug() << "current_dir =" << current_dir;
-			qDebug() << "levelrec =" << levelrec;
+			qDebug() << "levelrec =" << levelrec <<
+					 "\tcurrent_dir =" << current_dir;
 		}
 		if (levelrec>1) {
 			qDebug() << "paths.size() =" << paths.size();
@@ -249,20 +287,17 @@ int traverse( const char* start_folder )
 		paths.removeFirst();
 
 		QDir Dir_current = current_dir;
-		qDebug() << "Dir_current = " << Dir_current.absolutePath();
+		//~ qDebug() << "Dir_current = " << Dir_current.absolutePath();
 		Dir_current.setFilter( QDir::AllDirs|QDir::AllEntries|QDir::Hidden|
 							   QDir::System|QDir::NoDotAndDotDot );
 		QFileInfoList entries = Dir_current.entryInfoList();
 
 		if (entries.isEmpty()) continue;
 
-		//~ QFileInfo Dir_current_Info = QFileInfo(Dir_current, QDir::separator());
-		//~ QFileInfo Dir_current_Info = QFileInfo(Dir_current, ".");
-		//~ qDebug() << "Dir_current_Info = " << Dir_current_Info.absoluteFilePath();
 		int folder_id = get_folder_id(&current_dir);
 		int type_id;
 
-		QString it,filename, target, new_dir;
+		QString it, filename, target, new_dir;
 		for (QFileInfoList::ConstIterator entry=entries.begin();
 			 entry!=entries.end(); entry++) {
 
