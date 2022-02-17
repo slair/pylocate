@@ -1,4 +1,6 @@
 *.pch
+*.exe
+*.obj
 *.cpp.orig
 3rdparty/sqlitex/moc_sqlitedriver.cpp
 

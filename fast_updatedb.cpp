@@ -41,9 +41,47 @@ SQLiteDriver* driver = new SQLiteDriver();
 QSqlDatabase db = QSqlDatabase::addDatabase(driver);
 
 
+int put_type_id_to_db(const QString* type)
+{
+	int res = -1;
+	QSqlQuery q;
+	q.prepare("INSERT INTO types(name) VALUES (:name)");
+	q.bindValue(":name", *type);
+	q.exec();
+	db.commit();
+	QString query = QString("SELECT id FROM types WHERE name='%1'")
+					.arg(*type);
+	q.exec(query);
+	if (q.next()) {
+		res = q.value(0).toInt();
+		//~ qDebug() << "select after insert" << res;
+	} else {
+		qDebug() << "! FAILURE" << query;
+	}
+	return res;
+}
+
+int get_type_id_from_db(const QString* type)
+{
+	int res = -1;
+	QSqlQuery q;
+
+	QString query_string = QString("SELECT id FROM types WHERE "
+								   "name='%1'").arg(*type);
+	//~ qDebug() << query_string;
+	q.exec(query_string);
+
+	if (q.next()) {
+		res = q.value(0).toInt();
+		//~ qDebug() << "select" << res;
+	} else {
+		res = put_type_id_to_db(type);
+	}
+	return res;
+}
+
 int get_type_id(QFileInfoList::ConstIterator entry, const QString* type)
 {
-	QSqlQuery q;
 	int res = -1;
 	if (type->isEmpty()) {
 		if (cfg_type_use_magic) {
@@ -53,44 +91,18 @@ int get_type_id(QFileInfoList::ConstIterator entry, const QString* type)
 		}
 	} else {
 		// todo: search id of type
-		QString query_string = QString("SELECT id FROM types WHERE "
-									   "name='%1'").arg(*type);
-		//~ qDebug() << query_string;
-		q.exec(query_string);
-
-		if (q.next()) {
-			res = q.value(0).toInt();
-			//~ qDebug() << "select" << res;
-		} else {
-			q.prepare("INSERT INTO types(name) VALUES (:name)");
-			q.bindValue(":name", *type);
-			q.exec();
-			db.commit();
-			q.exec(QString("SELECT id FROM types WHERE name='%1'")
-				   .arg(*type));
-			if (q.next()) {
-				res = q.value(0).toInt();
-				//~ qDebug() << "select after insert" << res;
-			}
-		}
+		res = get_type_id_from_db(type);
 	}
 	return res;
 }
 
 
-int get_folder_id(const QString* folder)
-{
-	int res = -1;
-	//~ struct _stat folder_stat;
-	//~ QString folder_fullpath = folder;
-	unsigned int st_dev = 0;
-
-	//~ _stat(folder_fullpath.toUtf8().constData(), &folder_stat);
-
 #ifdef MS_WINDOWS
-	const wchar_t *path = (const wchar_t *)folder->utf16();
+bool get_BY_HANDLE_FILE_INFORMATION(const QString* item,
+									BY_HANDLE_FILE_INFORMATION* info)
+{
+	const wchar_t *path = (const wchar_t *)item->utf16();
 	HANDLE hFile;
-	BY_HANDLE_FILE_INFORMATION fileInfo;
 	hFile = CreateFileW(
 				path,
 				FILE_READ_ATTRIBUTES,
@@ -100,17 +112,44 @@ int get_folder_id(const QString* folder)
 				FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
 				NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
-		qDebug() << "! FAILURE! INVALID_HANDLE_VALUE";
+		qDebug() << "! FAILURE INVALID_HANDLE_VALUE";
+		CloseHandle(hFile);
+		return false;
 	} else {
-		if (!GetFileInformationByHandle(hFile, &fileInfo)) {
+		if (!GetFileInformationByHandle(hFile, info)) {
 			qDebug() << "! FAILURE GetFileInformationByHandle("
 					 "hFile, &fileInfo)";
+			CloseHandle(hFile);
+			return false;
 		}
 	}
 	CloseHandle(hFile);
-	st_dev = fileInfo.dwVolumeSerialNumber;
+	//~ res = fileInfo.dwVolumeSerialNumber;
 	//~ qDebug() << folder_fullpath << "st_dev =" << st_dev;
+	return true;
+}
 #endif /* MS_WINDOWS */
+
+
+unsigned int get_st_dev(const QString* item)
+{
+	unsigned int res = 0;
+#ifdef MS_WINDOWS
+	BY_HANDLE_FILE_INFORMATION fileInfo;
+	if (get_BY_HANDLE_FILE_INFORMATION(item, &fileInfo)) {
+		res = fileInfo.dwVolumeSerialNumber;
+	}
+#endif /* MS_WINDOWS */
+	return res;
+}
+
+
+int get_folder_id(const QString* folder)
+{
+	int res = -1;
+	//~ struct _stat folder_stat;
+	//~ QString folder_fullpath = folder;
+	unsigned int st_dev = get_st_dev(folder);
 
 	QSqlQuery q;
 	QString query_string = QString("SELECT id FROM folders WHERE name='%1' "
@@ -174,6 +213,25 @@ QString NTFSreadlink(QFileInfoList::ConstIterator entry)
 	//~ raise ValueError("not a link")
 	return res;
 }
+
+//~ #define Py_SAFE_DOWNCAST(VALUE, WIDE, NARROW) (NARROW)(VALUE)
+static __int64 secs_between_epochs = 11644473600; /* Seconds between
+													1.1.1601 and 1.1.1970 */
+
+static void
+FILE_TIME_to_time_t_nsec(FILETIME *in_ptr, time_t *time_out, int* nsec_out)
+{
+	/* XXX endianness. Shouldn't matter, as all Windows implementations
+		are little-endian */
+	/* Cannot simply cast and dereference in_ptr,
+	   since it might not be aligned properly */
+	__int64 in;
+	memcpy(&in, in_ptr, sizeof(in));
+	*nsec_out = (int)(in % 10000000) * 100; /* FILETIME is in units of
+		100 nsec. */
+	*time_out = Py_SAFE_DOWNCAST((in / 10000000) - secs_between_epochs,
+								 __int64, time_t);
+}
 #endif /* MS_WINDOWS */
 
 void add_or_update_fsitem(const int folder_id,
@@ -199,21 +257,49 @@ void add_or_update_fsitem(const int folder_id,
 	q.exec(query_string);
 	if (q.next()) {
 		// todo: check
-		qDebug() << "! check";
 		int id = q.value(0).toInt();
 		// todo: update
-		qDebug() << "! update";
 	} else {
 		// todo: insert new record
-		qDebug() << "! insert";
+
 		q.prepare("INSERT INTO fsitems(folder_id, name, inode, nlink, dev, "
 				  "stime, size, type_id, target, description, atime, mtime, "
-				  "ctime) VALUES (:inode, :nlink, :dev, :stime, :size, "
-				  ":type_id, :target, :description, :atime, :mtime, :ctime)");
+				  "ctime) VALUES (:folder_id, :name, :inode, :nlink, :dev, "
+				  ":stime, :size, :type_id, :target, :description, :atime, "
+				  ":mtime, :ctime)");
+		BY_HANDLE_FILE_INFORMATION fileInfo;
+		if (!get_BY_HANDLE_FILE_INFORMATION(&(entry->filePath()), &fileInfo)) {
+			qDebug() << "! FAILURE get_BY_HANDLE_FILE_INFORMATION(" <<
+					 entry->filePath() << ", &fileInfo))";
+			return;
+		}
 		q.bindValue(":folder_id", folder_id);
 		q.bindValue(":name", entry->fileName());
+		q.bindValue(":inode", (((uint64_t)fileInfo.nFileIndexHigh) << 32)
+					+ fileInfo.nFileIndexLow);
+		q.bindValue(":nlink", (uint64_t)fileInfo.nNumberOfLinks);
+		q.bindValue(":dev", (uint64_t)fileInfo.dwVolumeSerialNumber);
+		q.bindValue(":stime", dt_scan);
+		q.bindValue(":size", (((__int64)fileInfo.nFileSizeHigh)<<32)
+					+ fileInfo.nFileSizeLow);
 		q.bindValue(":type_id", my_type_id);
+		q.bindValue(":target", target);
+		q.bindValue(":description", "");	// todo: get description
+
+		time_t atime, mtime, ctime;
+		int atime_nsec, mtime_nsec, ctime_nsec;
+		FILE_TIME_to_time_t_nsec(&(fileInfo.ftLastAccessTime),
+								 &atime, &atime_nsec);
+		FILE_TIME_to_time_t_nsec(&(fileInfo.ftLastWriteTime),
+								 &mtime, &mtime_nsec);
+		FILE_TIME_to_time_t_nsec(&(fileInfo.ftCreationTime),
+								 &ctime, &ctime_nsec);
+		q.bindValue(":atime", QDateTime::fromMSecsSinceEpoch(atime_nsec));
+		q.bindValue(":mtime", QDateTime::fromMSecsSinceEpoch(mtime_nsec));
+		q.bindValue(":ctime", QDateTime::fromMSecsSinceEpoch(ctime_nsec));
 		q.exec();
+		//~ db.commit();
+		//~ qDebug() << q.lastQuery();
 		/*
 		db.commit();
 		q.exec(QString("SELECT id FROM folders WHERE name='%1' and dev=%2").arg(folder_fullpath).arg(st_dev));
@@ -252,7 +338,7 @@ int traverse( const char* start_folder )
 	QDateTime dt_scan = QDateTime::currentDateTime();
 
 	if (cfg_debug) {
-		qDebug() << "! start_folder = " << start_folder;
+		qDebug() << "start_folder = " << start_folder;
 	}
 
 	QStringList paths;
@@ -261,7 +347,7 @@ int traverse( const char* start_folder )
 	// get db for sqlite
 	db.setDatabaseName(cfg_fn_database);
 	if (!db.open()) {
-		qDebug() << "FAILURE! db.open() "<< db.lastError().text();
+		qDebug() << "! FAILURE db.open()" << db.lastError().text();
 		return NULL;
 	} else {
 		if (cfg_debug) {
@@ -295,6 +381,10 @@ int traverse( const char* start_folder )
 		if (entries.isEmpty()) continue;
 
 		int folder_id = get_folder_id(&current_dir);
+		if (-1==folder_id) {
+			qDebug() << "! ERROR int folder_id = get_folder_id(&current_dir);";
+			break;
+		}
 		int type_id;
 
 		QString it, filename, target, new_dir;
@@ -311,6 +401,11 @@ int traverse( const char* start_folder )
 			} else if (entry->isJunction()) {
 				it = "";
 				type_id = get_type_id(entry, &QString("junction link"));
+				if (-1==type_id) {
+					qDebug() << "! ERROR get_type_id(entry, "
+							 "&QString(\"junction link\")) == -1";
+					break;
+				}
 				target = NTFSreadlink(entry);
 				qDebug() << "junctionlink" << filename <<
 						 "->" << target;
@@ -320,6 +415,11 @@ int traverse( const char* start_folder )
 			} else if (entry->isSymbolicLink()) {
 				it = "";
 				type_id = get_type_id(entry, &QString("symbolic link"));
+				if (-1==type_id) {
+					qDebug() << "! get_type_id(entry, "
+							 "&QString(\"symbolic link\")) == -1";
+					break;
+				}
 				target = entry->symLinkTarget();
 				qDebug() << "symboliclink" << filename <<
 						 "->" << target;
@@ -353,6 +453,7 @@ int traverse( const char* start_folder )
 		}
 	}
 	if (db.isOpen()) {
+		db.commit();
 		db.close();
 		if (cfg_debug) {
 			qDebug() << "db closed";
@@ -388,7 +489,7 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 	} else if (int_poit==1) {
 		cfg_debug = true;
 	} else {
-		qDebug() << "FAILURE! int_poit =" << int_poit;
+		qDebug() << "! FAILURE int_poit =" << int_poit;
 	}
 	if (cfg_debug) {
 		qDebug() << "cfg_debug =" << cfg_debug;
@@ -402,7 +503,7 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 	} else if (int_poit==1) {
 		cfg_type_use_magic = true;
 	} else {
-		qDebug() << "FAILURE! int_poit =" << int_poit;
+		qDebug() << "! FAILURE int_poit =" << int_poit;
 	}
 	if (cfg_debug) {
 		qDebug() << "cfg_type_use_magic =" << cfg_type_use_magic;
