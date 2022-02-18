@@ -56,7 +56,7 @@ int put_type_id_to_db(const QString* type)
 		res = q.value(0).toInt();
 		//~ qDebug() << "select after insert" << res;
 	} else {
-		qDebug() << "! FAILURE" << query;
+		qCritical() << query;
 	}
 	return res;
 }
@@ -112,13 +112,13 @@ bool get_BY_HANDLE_FILE_INFORMATION(const QString* item,
 				FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
 				NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
-		qDebug() << "! FAILURE INVALID_HANDLE_VALUE";
+		qCritical() << "INVALID_HANDLE_VALUE";
 		CloseHandle(hFile);
 		return false;
 	} else {
 		if (!GetFileInformationByHandle(hFile, info)) {
-			qDebug() << "! FAILURE GetFileInformationByHandle("
-					 "hFile, &fileInfo)";
+			qCritical() << "GetFileInformationByHandle("
+						"hFile, &fileInfo)";
 			CloseHandle(hFile);
 			return false;
 		}
@@ -234,7 +234,7 @@ FILE_TIME_to_time_t_nsec(const FILETIME *in_ptr, time_t *time_out, int* nsec_out
 }
 #endif /* MS_WINDOWS */
 
-void add_or_update_fsitem(const int folder_id,
+bool add_or_update_fsitem(const int folder_id,
 						  const int type_id,	// -1 сами придумаем via magic
 						  const QString* target,
 						  QFileInfoList::ConstIterator entry,
@@ -242,8 +242,12 @@ void add_or_update_fsitem(const int folder_id,
 						 )
 {
 	int my_type_id;
-	if (type_id==-1) {
+	if (-1==type_id) {
 		my_type_id = get_type_id(entry, &QString(""));
+		if (-1==my_type_id) {
+			qCritical("get_type_id(entry, &QString("")) = -1");
+			return false;
+		}
 	} else {
 		my_type_id = type_id;
 	}
@@ -269,9 +273,9 @@ void add_or_update_fsitem(const int folder_id,
 				  ":mtime, :ctime)");
 		BY_HANDLE_FILE_INFORMATION fileInfo;
 		if (!get_BY_HANDLE_FILE_INFORMATION(&(entry->filePath()), &fileInfo)) {
-			qDebug() << "! FAILURE get_BY_HANDLE_FILE_INFORMATION(" <<
-					 entry->filePath() << ", &fileInfo))";
-			return;
+			qCritical() << "get_BY_HANDLE_FILE_INFORMATION(" <<
+						entry->filePath() << ", &fileInfo))";
+			return false;
 		}
 		q.bindValue(":folder_id", folder_id);
 		q.bindValue(":name", entry->fileName());
@@ -336,10 +340,13 @@ void add_or_update_fsitem(const int folder_id,
 	query.bindValue(":datetime", timestamp.toString("yyyy-MM-dd hh:mm:ss"));
 	// same as above but without the T
 	*/
+	return true;
 }
 
 int traverse( const char* start_folder )
 {
+	int err = 0;
+
 	QDateTime dt_scan = QDateTime::currentDateTime();
 
 	if (cfg_debug) {
@@ -352,8 +359,9 @@ int traverse( const char* start_folder )
 	// get db for sqlite
 	db.setDatabaseName(cfg_fn_database);
 	if (!db.open()) {
-		qDebug() << "! FAILURE db.open()" << db.lastError().text();
-		return NULL;
+		qCritical() << "db.open()" << db.lastError().text();
+		err = -1;
+		return err;
 	} else {
 		if (cfg_debug) {
 			qDebug() << "db opened";
@@ -388,6 +396,7 @@ int traverse( const char* start_folder )
 		int folder_id = get_folder_id(&current_dir);
 		if (-1==folder_id) {
 			qDebug() << "! ERROR int folder_id = get_folder_id(&current_dir);";
+			err = -2;
 			break;
 		}
 		int type_id;
@@ -400,8 +409,13 @@ int traverse( const char* start_folder )
 
 			if (entry->isFile()) {
 				it = "file";
-				add_or_update_fsitem(folder_id, -1, &QString(""),
-									 entry, &dt_scan);
+				if (!add_or_update_fsitem(folder_id, -1, &QString(""),
+										  entry, &dt_scan)) {
+					qCritical() << "add_or_update_fsitem(folder_id, "
+								"-1, &QString(\"\"), entry, &dt_scan)";
+					err = -3;
+					break;
+				}
 
 			} else if (entry->isJunction()) {
 				it = "";
@@ -414,8 +428,13 @@ int traverse( const char* start_folder )
 				target = NTFSreadlink(entry);
 				qDebug() << "junctionlink" << filename <<
 						 "->" << target;
-				add_or_update_fsitem(folder_id, type_id, &target,
-									 entry, &dt_scan);
+				if (!add_or_update_fsitem(folder_id, type_id, &target,
+										  entry, &dt_scan)) {
+					qCritical() << "add_or_update_fsitem(folder_id, "
+								"type_id, &target, entry, &dt_scan)";
+					err = -3;
+					break;
+				}
 
 			} else if (entry->isSymbolicLink()) {
 				it = "";
@@ -423,13 +442,19 @@ int traverse( const char* start_folder )
 				if (-1==type_id) {
 					qDebug() << "! get_type_id(entry, "
 							 "&QString(\"symbolic link\")) == -1";
+					err = -4;
 					break;
 				}
 				target = entry->symLinkTarget();
 				qDebug() << "symboliclink" << filename <<
 						 "->" << target;
-				add_or_update_fsitem(folder_id, type_id, &target,
-									 entry, &dt_scan);
+				if (!add_or_update_fsitem(folder_id, type_id, &target,
+										  entry, &dt_scan)) {
+					qCritical() << "add_or_update_fsitem(folder_id,"
+								" type_id, &target, entry, &dt_scan)";
+					err = -3;
+					break;
+				}
 
 			} else if (entry->isDir()) {
 				it = "";
@@ -456,6 +481,9 @@ int traverse( const char* start_folder )
 
 			if (it!="") qDebug().noquote() << it << filename;
 		}
+		if (err!=0) {
+			break;
+		}
 	}
 	if (db.isOpen()) {
 		db.commit();
@@ -464,24 +492,63 @@ int traverse( const char* start_folder )
 			qDebug() << "db closed";
 		}
 	}
-	return 1;
+	return err;
 }
 
 //~ int argc = 0;
 //~ char* argv[1];
 //~ QCoreApplication app(argc, argv);
 
+
+void verboseMessageHandler(QtMsgType type, const QMessageLogContext &context,
+						   const QString &msg)
+{
+	static const char* typeStr[] = {"   DEBUG", " WARNING",
+									"CRITICAL", "   FATAL"
+								   };
+
+	if(type <= QtFatalMsg) {
+		QByteArray localMsg = msg.toLocal8Bit();
+		//~ QString contextString(QStringLiteral("%1:%2: %3")
+		//~ .arg(context.file)
+		//~ .arg(context.line)
+		//~ .arg(context.function));
+		QString contextString(QStringLiteral("%1:%2: ")
+							  .arg(context.file)
+							  .arg(context.line));
+
+		QString timeStr(QDateTime::currentDateTime()
+						.toString("dd-MM-yy HH:mm:ss:zzz"));
+
+		//~ std::cerr << timeStr.toLocal8Bit().constData() << " - "
+
+		std::cout << contextString.toLocal8Bit().constData()
+				  << typeStr[type] << " "
+				  //~ << timeStr.toLocal8Bit().constData() << " "
+				  << localMsg.constData() << std::endl;
+
+		if(type == QtFatalMsg) {
+			abort();
+		}
+	}
+}
+
+
 static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 {
 	//~ QTextCodec *codec = QTextCodec::codecForName("UTF-8");
 	//~ QTextCodec::setCodecForCStrings(codec);
-	qInstallMessageHandler(myMessageOutput);
+
+	//~ qSetMessagePattern("%{file}:%{line}: %{message}");
+
+	//~ qInstallMessageHandler(myMessageOutput);
+	qInstallMessageHandler(verboseMessageHandler);
 
 	const char* start_folder;
 
 	if (!PyArg_ParseTuple(args, "sO", &start_folder, &obj_cfg)) {
-		qDebug() << "FAILURE! "
-				 "PyArg_ParseTuple(args, ""sO"", &start_folder, &obj_cfg)";
+		qCritical() << "!PyArg_ParseTuple(args, ""sO"", "
+					"&start_folder, &obj_cfg)";
 		return NULL;
 	}
 
@@ -496,7 +563,7 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 	} else if (int_poit==1) {
 		cfg_debug = true;
 	} else {
-		qDebug() << "! FAILURE int_poit =" << int_poit;
+		qCritical() << "int_poit =" << int_poit;
 	}
 	if (cfg_debug) {
 		qDebug() << "cfg_debug =" << cfg_debug;
@@ -510,7 +577,7 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 	} else if (int_poit==1) {
 		cfg_type_use_magic = true;
 	} else {
-		qDebug() << "! FAILURE int_poit =" << int_poit;
+		qCritical() << "int_poit =" << int_poit;
 	}
 	if (cfg_debug) {
 		qDebug() << "cfg_type_use_magic =" << cfg_type_use_magic;

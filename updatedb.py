@@ -29,8 +29,9 @@ myname = os.path.splitext(os.path.basename(__file__))[0]
 if _DEBUG:
 	loglevel = logging.DEBUG
 
-logging.basicConfig(level=loglevel, format='%(filename)s:%(lineno)d: ' + \
-	'%(name)s: %(levelname)s: %(message)s')
+logging.basicConfig(level=loglevel, format='%(filename)12s:%(lineno)03d: ' + \
+	'%(levelname)8s %(message)s')
+	#~ '%(name)s: %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 logd=logger.debug
 logi=logger.info

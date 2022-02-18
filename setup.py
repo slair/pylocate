@@ -27,7 +27,7 @@ module_fastupdatedb = Extension(
 	libraries = ["Qt5Core", "Qt5Sql"],
 	library_dirs = ["C:\\apps\\qt\\lib"],
 	sources = [
-		"fast_updatedb.cpp",
+		"f_upd_db.cpp",
 		"3rdparty\\sqlite\\sqlite3.c",
 		"3rdparty\\sqlitex\\sqlitedriver.cpp",
 		"3rdparty\\sqlitex\\moc_sqlitedriver.cpp",
@@ -36,7 +36,8 @@ module_fastupdatedb = Extension(
 		"3rdparty\\qupzilla\\qzregexp.cpp",
 	],
 	#~ extra_compile_args = ["/Yu", "/Yc"],
-	extra_compile_args = ["/Yc"],
+	#~ extra_compile_args = ["/Yc"],
+	extra_compile_args = [],
 	extra_link_args = [],
 	)
 
