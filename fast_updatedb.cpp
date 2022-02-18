@@ -219,7 +219,7 @@ static __int64 secs_between_epochs = 11644473600; /* Seconds between
 													1.1.1601 and 1.1.1970 */
 
 static void
-FILE_TIME_to_time_t_nsec(FILETIME *in_ptr, time_t *time_out, int* nsec_out)
+FILE_TIME_to_time_t_nsec(const FILETIME *in_ptr, time_t *time_out, int* nsec_out)
 {
 	/* XXX endianness. Shouldn't matter, as all Windows implementations
 		are little-endian */
@@ -279,24 +279,29 @@ void add_or_update_fsitem(const int folder_id,
 					+ fileInfo.nFileIndexLow);
 		q.bindValue(":nlink", (uint64_t)fileInfo.nNumberOfLinks);
 		q.bindValue(":dev", (uint64_t)fileInfo.dwVolumeSerialNumber);
-		q.bindValue(":stime", dt_scan);
+		q.bindValue(":stime", *dt_scan);
 		q.bindValue(":size", (((__int64)fileInfo.nFileSizeHigh)<<32)
 					+ fileInfo.nFileSizeLow);
 		q.bindValue(":type_id", my_type_id);
-		q.bindValue(":target", target);
+		q.bindValue(":target", *target);
 		q.bindValue(":description", "");	// todo: get description
 
 		time_t atime, mtime, ctime;
 		int atime_nsec, mtime_nsec, ctime_nsec;
-		FILE_TIME_to_time_t_nsec(&(fileInfo.ftLastAccessTime),
+		FILE_TIME_to_time_t_nsec(&fileInfo.ftLastAccessTime,
 								 &atime, &atime_nsec);
-		FILE_TIME_to_time_t_nsec(&(fileInfo.ftLastWriteTime),
+		FILE_TIME_to_time_t_nsec(&fileInfo.ftLastWriteTime,
 								 &mtime, &mtime_nsec);
-		FILE_TIME_to_time_t_nsec(&(fileInfo.ftCreationTime),
+		FILE_TIME_to_time_t_nsec(&fileInfo.ftCreationTime,
 								 &ctime, &ctime_nsec);
-		q.bindValue(":atime", QDateTime::fromMSecsSinceEpoch(atime_nsec));
-		q.bindValue(":mtime", QDateTime::fromMSecsSinceEpoch(mtime_nsec));
-		q.bindValue(":ctime", QDateTime::fromMSecsSinceEpoch(ctime_nsec));
+		QDateTime ts;
+		ts.setTime_t(atime);
+		qDebug() << atime << " -> " << ts;
+		q.bindValue(":atime", ts);
+		ts.setTime_t(mtime);
+		q.bindValue(":mtime", ts);
+		ts.setTime_t(ctime);
+		q.bindValue(":ctime", ts);
 		q.exec();
 		//~ db.commit();
 		//~ qDebug() << q.lastQuery();
@@ -468,6 +473,8 @@ int traverse( const char* start_folder )
 
 static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 {
+	//~ QTextCodec *codec = QTextCodec::codecForName("UTF-8");
+	//~ QTextCodec::setCodecForCStrings(codec);
 	qInstallMessageHandler(myMessageOutput);
 
 	const char* start_folder;
