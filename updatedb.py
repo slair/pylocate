@@ -802,6 +802,8 @@ def main():
 	#~ print(os.stat("c:", follow_symlinks=False))
 	#~ print(os.stat("c:\\", follow_symlinks=False))
 	#~ sys.stdout.flush()
+
+	#~ cfg.debug = False
 	fast_updatedb("C:\\", cfg)
 
 	logd("elapsed %.9f", time.perf_counter() - t_start)

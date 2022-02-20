@@ -11,7 +11,7 @@ using namespace std;
 int main ()
 {
 	struct _stat item_stat;
-	string fp = "c:\\temp";
+	string fp = "c:\\pagefile.sys";
 	_stat(fp.c_str(), &item_stat);
 
 	cout << "st_dev =\t" << item_stat.st_dev << endl;

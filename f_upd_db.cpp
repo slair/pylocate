@@ -1,5 +1,7 @@
 // -*- coding: utf-8 -*-
 
+//~ // cppcheck-suppress missingInclude
+
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
@@ -7,20 +9,11 @@
 
 #ifdef MS_WINDOWS
 #include <windows.h>
-//~ #include <pathcch.h>
 #endif
 
-#include <QCoreApplication>
+//~ #include <QCoreApplication>
 #include <QDebug>
-void myMessageOutput(QtMsgType type,
-					 const QMessageLogContext &context, const QString &msg)
-{
-	QTextStream cout(stdout, QIODevice::WriteOnly);
-	cout << msg << Qt::endl;
-}
-
 #include <QDir>
-
 #include <QSql>
 #include <QSqlError>
 #include <QSqlDatabase>
@@ -31,10 +24,12 @@ void myMessageOutput(QtMsgType type,
 
 #include "sqlitedriver.h"
 
+
 PyObject*	obj_cfg;
 QStringList	cfg_exclude_folders;
 bool		cfg_debug;
 bool		cfg_type_use_magic;
+size_t		cfg_big_items_count_in_folder;
 QString		cfg_fn_database;
 
 SQLiteDriver* driver = new SQLiteDriver();
@@ -61,6 +56,7 @@ int put_type_id_to_db(const QString* type)
 	return res;
 }
 
+
 int get_type_id_from_db(const QString* type)
 {
 	int res = -1;
@@ -80,6 +76,7 @@ int get_type_id_from_db(const QString* type)
 	return res;
 }
 
+
 int get_type_id(QFileInfoList::ConstIterator entry, const QString* type)
 {
 	int res = -1;
@@ -87,7 +84,7 @@ int get_type_id(QFileInfoList::ConstIterator entry, const QString* type)
 		if (cfg_type_use_magic) {
 			// todo: use magic to determine file type
 		} else {
-			// todo: somehow determine file type
+			res = get_type_id_from_db(&QString("no magic allowed"));
 		}
 	} else {
 		// todo: search id of type
@@ -112,7 +109,7 @@ bool get_BY_HANDLE_FILE_INFORMATION(const QString* item,
 				FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,
 				NULL);
 	if (hFile == INVALID_HANDLE_VALUE) {
-		qCritical() << "INVALID_HANDLE_VALUE";
+		//~ qWarning() << "INVALID_HANDLE_VALUE " << *item;
 		CloseHandle(hFile);
 		return false;
 	} else {
@@ -173,48 +170,93 @@ int get_folder_id(const QString* folder)
 			//~ qDebug() << "select after insert" << res;
 		}
 	}
-	if (cfg_debug) {
-		qDebug() << "int get_folder_id(" << *folder << ") = " << res;
+	//~ qDebug() << "int get_folder_id(" << *folder << ") = " << res;
+	return res;
+}
+
+
+#ifdef MS_WINDOWS
+typedef struct _REPARSE_DATA_BUFFER {
+	ULONG  ReparseTag;
+	USHORT ReparseDataLength;
+	USHORT Reserved;
+	union {
+		struct {
+			USHORT SubstituteNameOffset;
+			USHORT SubstituteNameLength;
+			USHORT PrintNameOffset;
+			USHORT PrintNameLength;
+			ULONG Flags;
+			WCHAR PathBuffer[1];
+		} SymbolicLinkReparseBuffer;
+		struct {
+			USHORT SubstituteNameOffset;
+			USHORT SubstituteNameLength;
+			USHORT PrintNameOffset;
+			USHORT PrintNameLength;
+			WCHAR PathBuffer[1];
+		} MountPointReparseBuffer;
+		struct {
+			UCHAR  DataBuffer[1];
+		} GenericReparseBuffer;
+	} DUMMYUNIONNAME;
+} REPARSE_DATA_BUFFER;
+
+
+QString NTFSreadlink(QFileInfoList::ConstIterator entry)
+{
+	QString path = QDir::toNativeSeparators(entry->filePath());
+	//~ qDebug() << path;
+	QString res;
+
+	//~ DWORD result = (DWORD)E_FAIL;
+	//~ TCHAR TargetPath[MAX_PATH];
+	//~ LPTSTR TargetPath;
+	//~ size_t TargetSize;
+
+	HANDLE reparse_point_handle = CreateFileW((const wchar_t*) path.utf16(),
+								  0, 0, NULL,
+								  OPEN_EXISTING,
+								  FILE_FLAG_OPEN_REPARSE_POINT
+								  |FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
+	BOOL io_result = false;
+	char target_buffer[MAXIMUM_REPARSE_DATA_BUFFER_SIZE] = {0};
+	REPARSE_DATA_BUFFER& reparseData = *(REPARSE_DATA_BUFFER*)target_buffer;
+	DWORD n_bytes_returned;
+
+	if (reparse_point_handle == INVALID_HANDLE_VALUE) {
+		qWarning() << "INVALID_HANDLE_VALUE" << path;
+		CloseHandle(reparse_point_handle);
+	} else {
+		io_result = DeviceIoControl(reparse_point_handle,
+									FSCTL_GET_REPARSE_POINT,
+									NULL, 0,
+									&reparseData,
+									sizeof(target_buffer),
+									&n_bytes_returned,
+									NULL);
+		CloseHandle(reparse_point_handle);
+	}
+	if (!io_result) {
+		qWarning() << "io_result =" << io_result;
+	} else {
+		if (reparseData.ReparseTag==IO_REPARSE_TAG_MOUNT_POINT) {
+			res = QString::fromUtf16((const char16_t *)
+									 (reparseData
+									  .MountPointReparseBuffer
+									  .PathBuffer + reparseData
+									  .MountPointReparseBuffer
+									  .PrintNameOffset/sizeof(WCHAR)),
+									 reparseData
+									 .MountPointReparseBuffer
+									 .PrintNameLength/sizeof(WCHAR)
+									);
+		}
 	}
 	return res;
 }
 
-#ifdef MS_WINDOWS
-QString NTFSreadlink(QFileInfoList::ConstIterator entry)
-{
-	QString res = entry->fileName();
-//~ def NTFSreadlink(path):
-	//~ reparse_point_handle = CreateFileW(path,
-	//~ 0,
-	//~ 0,
-	//~ None,
-	//~ OPEN_EXISTING,
-	//~ FILE_FLAG_OPEN_REPARSE_POINT |
-	//~ FILE_FLAG_BACKUP_SEMANTICS,
-	//~ None)
-	//~ if reparse_point_handle == INVALID_HANDLE_VALUE:
-	//~ raise WinError()
-	//~ target_buffer = c_buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE)
-	//~ n_bytes_returned = DWORD()
-	//~ io_result = DeviceIoControl(reparse_point_handle,
-	//~ FSCTL_GET_REPARSE_POINT,
-	//~ None, 0,
-	//~ target_buffer, len(target_buffer),
-	//~ byref(n_bytes_returned),
-	//~ None)
-	//~ CloseHandle(reparse_point_handle)
-	//~ if not io_result:
-	//~ raise WinError()
-	//~ rdb = REPARSE_DATA_BUFFER.from_buffer(target_buffer)
-	//~ if rdb.ReparseTag == IO_REPARSE_TAG_SYMLINK:
-	//~ return rdb.SymbolicLinkReparseBuffer.PrintName
-	//~ elif rdb.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT:
-	//~ return rdb.MountPointReparseBuffer.PrintName
-	//~ raise ValueError("not a link")
-	return res;
-}
-
-//~ #define Py_SAFE_DOWNCAST(VALUE, WIDE, NARROW) (NARROW)(VALUE)
 static __int64 secs_between_epochs = 11644473600; /* Seconds between
 													1.1.1601 and 1.1.1970 */
 
@@ -261,6 +303,7 @@ bool add_or_update_fsitem(const int folder_id,
 	q.exec(query_string);
 	if (q.next()) {
 		// todo: check
+		// cppcheck-suppress unreadVariable
 		int id = q.value(0).toInt();
 		// todo: update
 	} else {
@@ -272,40 +315,51 @@ bool add_or_update_fsitem(const int folder_id,
 				  ":stime, :size, :type_id, :target, :description, :atime, "
 				  ":mtime, :ctime)");
 		BY_HANDLE_FILE_INFORMATION fileInfo;
-		if (!get_BY_HANDLE_FILE_INFORMATION(&(entry->filePath()), &fileInfo)) {
-			qCritical() << "get_BY_HANDLE_FILE_INFORMATION(" <<
-						entry->filePath() << ", &fileInfo))";
-			return false;
+		if (!get_BY_HANDLE_FILE_INFORMATION(&entry->filePath(), &fileInfo)) {
+			//~ qWarning() << "get_BY_HANDLE_FILE_INFORMATION(" <<
+			//~ entry->filePath() << ", &fileInfo))";
+			//~ return false;
+			qWarning() << "unaccessible"
+					   << QDir::toNativeSeparators(entry->filePath());
+			my_type_id = get_type_id_from_db(&QString("unaccessible"));
+			q.bindValue(":inode", 0);
+			q.bindValue(":nlink", 0);
+			q.bindValue(":dev", 0);
+			q.bindValue(":size", 0);
+			q.bindValue(":atime", 0);
+			q.bindValue(":mtime", 0);
+			q.bindValue(":ctime", 0);
+		} else {
+			q.bindValue(":inode", (((uint64_t)fileInfo.nFileIndexHigh) << 32)
+						+ fileInfo.nFileIndexLow);
+			q.bindValue(":nlink", (uint64_t)fileInfo.nNumberOfLinks);
+			q.bindValue(":dev", (uint64_t)fileInfo.dwVolumeSerialNumber);
+			q.bindValue(":size", (((__int64)fileInfo.nFileSizeHigh)<<32)
+						+ fileInfo.nFileSizeLow);
+			time_t atime, mtime, ctime;
+			int atime_nsec, mtime_nsec, ctime_nsec;
+			FILE_TIME_to_time_t_nsec(&fileInfo.ftLastAccessTime,
+									 &atime, &atime_nsec);
+			FILE_TIME_to_time_t_nsec(&fileInfo.ftLastWriteTime,
+									 &mtime, &mtime_nsec);
+			FILE_TIME_to_time_t_nsec(&fileInfo.ftCreationTime,
+									 &ctime, &ctime_nsec);
+			QDateTime ts;
+			ts.setTime_t(atime);
+			//~ qDebug() << atime << " -> " << ts;
+			q.bindValue(":atime", ts);
+			ts.setTime_t(mtime);
+			q.bindValue(":mtime", ts);
+			ts.setTime_t(ctime);
+			q.bindValue(":ctime", ts);
 		}
+		q.bindValue(":stime", *dt_scan);
 		q.bindValue(":folder_id", folder_id);
 		q.bindValue(":name", entry->fileName());
-		q.bindValue(":inode", (((uint64_t)fileInfo.nFileIndexHigh) << 32)
-					+ fileInfo.nFileIndexLow);
-		q.bindValue(":nlink", (uint64_t)fileInfo.nNumberOfLinks);
-		q.bindValue(":dev", (uint64_t)fileInfo.dwVolumeSerialNumber);
-		q.bindValue(":stime", *dt_scan);
-		q.bindValue(":size", (((__int64)fileInfo.nFileSizeHigh)<<32)
-					+ fileInfo.nFileSizeLow);
 		q.bindValue(":type_id", my_type_id);
 		q.bindValue(":target", *target);
 		q.bindValue(":description", "");	// todo: get description
 
-		time_t atime, mtime, ctime;
-		int atime_nsec, mtime_nsec, ctime_nsec;
-		FILE_TIME_to_time_t_nsec(&fileInfo.ftLastAccessTime,
-								 &atime, &atime_nsec);
-		FILE_TIME_to_time_t_nsec(&fileInfo.ftLastWriteTime,
-								 &mtime, &mtime_nsec);
-		FILE_TIME_to_time_t_nsec(&fileInfo.ftCreationTime,
-								 &ctime, &ctime_nsec);
-		QDateTime ts;
-		ts.setTime_t(atime);
-		qDebug() << atime << " -> " << ts;
-		q.bindValue(":atime", ts);
-		ts.setTime_t(mtime);
-		q.bindValue(":mtime", ts);
-		ts.setTime_t(ctime);
-		q.bindValue(":ctime", ts);
 		q.exec();
 		//~ db.commit();
 		//~ qDebug() << q.lastQuery();
@@ -349,9 +403,7 @@ int traverse( const char* start_folder )
 
 	QDateTime dt_scan = QDateTime::currentDateTime();
 
-	if (cfg_debug) {
-		qDebug() << "start_folder = " << start_folder;
-	}
+	qDebug() << "start_folder = " << start_folder;
 
 	QStringList paths;
 	paths << start_folder;
@@ -363,9 +415,7 @@ int traverse( const char* start_folder )
 		err = -1;
 		return err;
 	} else {
-		if (cfg_debug) {
-			qDebug() << "db opened";
-		}
+		qDebug() << "db opened";
 	}
 
 	while (!paths.isEmpty()) {
@@ -374,10 +424,6 @@ int traverse( const char* start_folder )
 		QString current_dir = paths.constFirst();
 
 		levelrec = current_dir.count(QDir::separator());
-		if (cfg_debug) {
-			qDebug() << "levelrec =" << levelrec <<
-					 "\tcurrent_dir =" << current_dir;
-		}
 		if (levelrec>1) {
 			qDebug() << "paths.size() =" << paths.size();
 			break;
@@ -393,9 +439,15 @@ int traverse( const char* start_folder )
 
 		if (entries.isEmpty()) continue;
 
+		if (cfg_big_items_count_in_folder < entries.size()) {
+			qDebug() << "levelrec =" << levelrec
+					 << "\t" << current_dir
+					 << "\t" << entries.size();
+		}
+
 		int folder_id = get_folder_id(&current_dir);
 		if (-1==folder_id) {
-			qDebug() << "! ERROR int folder_id = get_folder_id(&current_dir);";
+			qCritical() << "int folder_id = get_folder_id(&current_dir);";
 			err = -2;
 			break;
 		}
@@ -408,7 +460,7 @@ int traverse( const char* start_folder )
 			filename = entry->fileName();
 
 			if (entry->isFile()) {
-				it = "file";
+				it = "";
 				if (!add_or_update_fsitem(folder_id, -1, &QString(""),
 										  entry, &dt_scan)) {
 					qCritical() << "add_or_update_fsitem(folder_id, "
@@ -426,8 +478,8 @@ int traverse( const char* start_folder )
 					break;
 				}
 				target = NTFSreadlink(entry);
-				qDebug() << "junctionlink" << filename <<
-						 "->" << target;
+				//~ qDebug() << "junctionlink" << filename <<
+				//~ "->" << target;
 				if (!add_or_update_fsitem(folder_id, type_id, &target,
 										  entry, &dt_scan)) {
 					qCritical() << "add_or_update_fsitem(folder_id, "
@@ -445,9 +497,9 @@ int traverse( const char* start_folder )
 					err = -4;
 					break;
 				}
-				target = entry->symLinkTarget();
-				qDebug() << "symboliclink" << filename <<
-						 "->" << target;
+				target = QDir::toNativeSeparators(entry->symLinkTarget());
+				//~ qDebug() << "symboliclink" << filename <<
+				//~ "->" << target;
 				if (!add_or_update_fsitem(folder_id, type_id, &target,
 										  entry, &dt_scan)) {
 					qCritical() << "add_or_update_fsitem(folder_id,"
@@ -468,13 +520,10 @@ int traverse( const char* start_folder )
 				if (!cfg_exclude_folders.contains(new_dir)) {
 					paths << new_dir;
 				} else {
-					if (cfg_debug) {
-						qDebug() << "Folder" <<
-								 new_dir <<
-								 "excluded by config";
-					}
+					qWarning() << "folder" <<
+							   new_dir <<
+							   "excluded by config";
 				}
-
 			} else {
 				it = "unknown";
 			}
@@ -488,9 +537,7 @@ int traverse( const char* start_folder )
 	if (db.isOpen()) {
 		db.commit();
 		db.close();
-		if (cfg_debug) {
-			qDebug() << "db closed";
-		}
+		qDebug() << "db closed";
 	}
 	return err;
 }
@@ -508,7 +555,14 @@ void verboseMessageHandler(QtMsgType type, const QMessageLogContext &context,
 								   };
 
 	if(type <= QtFatalMsg) {
+
+#ifdef MS_WINDOWS
+		// Установка кодека для нормальной работы консоли
+		QTextCodec::setCodecForLocale(QTextCodec::codecForName("CP 866"));
+#endif
+
 		QByteArray localMsg = msg.toLocal8Bit();
+
 		//~ QString contextString(QStringLiteral("%1:%2: %3")
 		//~ .arg(context.file)
 		//~ .arg(context.line)
@@ -521,27 +575,74 @@ void verboseMessageHandler(QtMsgType type, const QMessageLogContext &context,
 						.toString("dd-MM-yy HH:mm:ss:zzz"));
 
 		//~ std::cerr << timeStr.toLocal8Bit().constData() << " - "
+		if (type>0 || cfg_debug) {
+			std::cout << contextString.toLocal8Bit().constData()
+					  << typeStr[type] << " "
+					  //~ << timeStr.toLocal8Bit().constData() << " "
+					  << localMsg.constData() << std::endl;
+			//~ std::cout.flush();
+		}
 
-		std::cout << contextString.toLocal8Bit().constData()
-				  << typeStr[type] << " "
-				  //~ << timeStr.toLocal8Bit().constData() << " "
-				  << localMsg.constData() << std::endl;
-
+#ifdef MS_WINDOWS
+		// Установка кодека для нормальной работы локали
+		QTextCodec::setCodecForLocale(QTextCodec::codecForName("CP 1251"));
+#endif
 		if(type == QtFatalMsg) {
 			abort();
 		}
 	}
 }
+size_t get_size_t_attr_from_PyObject(PyObject* obj, const char* attr)
+{
+	size_t res;
+	PyObject* obj_attr = PyObject_GetAttrString(obj, attr);
+	res = PyLong_AsSize_t(obj_attr);
+	return res;
+}
+
+bool get_bool_attr_from_PyObject(PyObject* obj, const char* attr)
+{
+	bool res;
+	int int_poit;
+	PyObject* obj_attr = PyObject_GetAttrString(obj, attr);
+	int_poit = PyObject_IsTrue(obj_attr);
+	if (int_poit==0) {
+		res = false;
+	} else if (int_poit==1) {
+		res = true;
+	} else {
+		qCritical() << "int_poit =" << int_poit;
+	}
+	return res;
+}
+
+QString	get_QString_attr_from_PyObject(PyObject* obj, const char* attr)
+{
+	QString res;
+	PyObject* obj_attr = PyObject_GetAttrString(obj, attr);
+	res = PyUnicode_AsUTF8(obj_attr);
+	return res;
+}
+
+
+QStringList get_QStringList_attr_from_PyObject(PyObject* obj,
+		const char* attr)
+{
+	QStringList res;
+	PyObject* obj_attr = PyObject_GetAttrString(obj, attr);
+	Py_ssize_t ef_size = PyList_Size(obj_attr);
+	for(Py_ssize_t i=0; i<ef_size; i++) {
+		PyObject* ef_pystr = PyList_GetItem(obj_attr, i);
+		const char *c_str = PyUnicode_AsUTF8(ef_pystr);
+		QString out = QString(c_str);
+		res << QDir::toNativeSeparators(QDir::cleanPath(out));
+	}
+	return res;
+}
 
 
 static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 {
-	//~ QTextCodec *codec = QTextCodec::codecForName("UTF-8");
-	//~ QTextCodec::setCodecForCStrings(codec);
-
-	//~ qSetMessagePattern("%{file}:%{line}: %{message}");
-
-	//~ qInstallMessageHandler(myMessageOutput);
 	qInstallMessageHandler(verboseMessageHandler);
 
 	const char* start_folder;
@@ -552,64 +653,32 @@ static PyObject* updatedb_impl(PyObject* self, PyObject* args)
 		return NULL;
 	}
 
-	int int_poit;	// PyObject_IsTrue
-	PyObject* obj_pogas;	//PyObject_GetAttrString;
+	// get debug flag from cfg
+	cfg_debug = get_bool_attr_from_PyObject(obj_cfg, "debug");
+	qDebug() << "cfg_debug =" << cfg_debug;
 
-	// get cfg.debug flag
-	obj_pogas = PyObject_GetAttrString(obj_cfg, "debug");
-	int_poit = PyObject_IsTrue(obj_pogas);
-	if (int_poit==0) {
-		cfg_debug = false;
-	} else if (int_poit==1) {
-		cfg_debug = true;
-	} else {
-		qCritical() << "int_poit =" << int_poit;
-	}
-	if (cfg_debug) {
-		qDebug() << "cfg_debug =" << cfg_debug;
-	}
+	// get type_use_magic from cfg
+	cfg_type_use_magic = get_bool_attr_from_PyObject(obj_cfg, "type_use_magic");
+	qDebug() << "cfg_type_use_magic =" << cfg_type_use_magic;
 
-	// get cfg.type_use_magic
-	obj_pogas = PyObject_GetAttrString(obj_cfg, "type_use_magic");
-	int_poit = PyObject_IsTrue(obj_pogas);
-	if (int_poit==0) {
-		cfg_type_use_magic = false;
-	} else if (int_poit==1) {
-		cfg_type_use_magic = true;
-	} else {
-		qCritical() << "int_poit =" << int_poit;
-	}
-	if (cfg_debug) {
-		qDebug() << "cfg_type_use_magic =" << cfg_type_use_magic;
-	}
+	// get fn_database from cfg
+	cfg_fn_database = get_QString_attr_from_PyObject(obj_cfg, "fn_database");
+	qDebug() << "cfg_fn_database =" << cfg_fn_database;
 
-	// get cfg.fn_database
-	PyObject* obj_cfg_fn_database = PyObject_GetAttrString(obj_cfg,
-									"fn_database");
-	cfg_fn_database = PyUnicode_AsUTF8(obj_cfg_fn_database);
-	if (cfg_debug) {
-		qDebug() << "cfg_fn_database =" << cfg_fn_database;
-	}
+	// get exclude_folders from cfg
+	cfg_exclude_folders = get_QStringList_attr_from_PyObject(obj_cfg,
+						  "exclude_folders");
+	qDebug() << "cfg_exclude_folders =" << cfg_exclude_folders;
 
-	// get cfg.exclude_folders
-	PyObject* obj_cfg_exclude_folders = PyObject_GetAttrString(obj_cfg,
-										"exclude_folders");
-	Py_ssize_t ef_size = PyList_Size(obj_cfg_exclude_folders);
-	for(Py_ssize_t i=0; i<ef_size; i++) {
-		PyObject* ef_pystr = PyList_GetItem(obj_cfg_exclude_folders, i);
-		const char *c_str = PyUnicode_AsUTF8(ef_pystr);
-		QString out = QString(c_str);
-		cfg_exclude_folders << QDir::toNativeSeparators(QDir::cleanPath(out));
-	}
-	if (cfg_debug) {
-		qDebug() << "cfg_exclude_folders =" << cfg_exclude_folders;
-	}
+	// get cfg_big_items_count_in_folder from cfg
+	cfg_big_items_count_in_folder = get_size_t_attr_from_PyObject(obj_cfg,
+									"big_items_count_in_folder");
+	qDebug() << "cfg_big_items_count_in_folder ="
+			 << cfg_big_items_count_in_folder;
 
 	int r = traverse(start_folder);
 
-	if (cfg_debug) {
-		qDebug() << "traverse(" << start_folder << ") =" << r;
-	}
+	qDebug() << "traverse(" << start_folder << ") =" << r;
 
 	Py_RETURN_NONE;
 }
@@ -630,7 +699,8 @@ static struct PyModuleDef cppmodule = {
 	CPPMethods
 };
 
-PyMODINIT_FUNC PyInit__fudb(void)  	// cppcheck: disable=unusedFunction
+// cppcheck-suppress [unusedFunction]
+PyMODINIT_FUNC PyInit__fudb(void)
 {
 	return PyModule_Create(&cppmodule);
 }
