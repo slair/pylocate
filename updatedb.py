@@ -1,22 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-_DEBUG = True
-COMMIT_INTERVAL = 50
+import os
+import sys
+#~ import string
+import stat
+#~ import subprocess
+import time
+import json
+import argparse
+import logging
+#~ import tempfile
 
-import os, sys, string, stat, subprocess, time, json, argparse, logging
-
-win32 = sys.platform=="win32"
-linux = sys.platform=="linux"
-stop = sys.exit
-
-import tempfile
 from datetime import datetime
+
+import sqlalchemy
+import magic
 
 from dbgtools import str_obj
 
-sys.path.append("build\lib.win-amd64-3.7")
+from config import cfg
+
+from models import FSItemFolder, FSItemType, FSItem, InitDB
+
+#~ sys.path.append("build\\lib.win-amd64-3.7")
 from _fudb import fast_updatedb
+
+_DEBUG = True
+COMMIT_INTERVAL = 50
+
+win32 = sys.platform == "win32"
+linux = sys.platform == "linux"
+stop = sys.exit
 
 try:
 	_DEBUG
@@ -29,21 +44,15 @@ myname = os.path.splitext(os.path.basename(__file__))[0]
 if _DEBUG:
 	loglevel = logging.DEBUG
 
-logging.basicConfig(level=loglevel, format='%(filename)12s:%(lineno)03d: ' + \
-	'%(levelname)8s %(message)s')
+logging.basicConfig(level=loglevel, format='%(filename)12s:%(lineno)03d: '
+	+ '%(levelname)8s %(message)s')
 	#~ '%(name)s: %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
-logd=logger.debug
-logi=logger.info
-logw=logger.warning
-loge=logger.error
-logc=logger.critical
-
-import sqlalchemy, magic
-
-from config import cfg
-
-from models import FSItemFolder, FSItemType, FSItem, InitDB
+logd = logger.debug
+logi = logger.info
+logw = logger.warning
+loge = logger.error
+logc = logger.critical
 
 
 def save_obj(obj, fn):
@@ -80,10 +89,10 @@ def fsitem_add_or_update(session, item):
 		changed = []
 
 		for cmp_item in cmp_attrs:
-			if getattr(item, cmp_item)!=getattr(db_item, cmp_item):
+			if getattr(item, cmp_item) != getattr(db_item, cmp_item):
 				changed.append(cmp_item)
 
-		if len(changed)>0:
+		if len(changed) > 0:
 
 			for changed_item in changed:
 				setattr(db_item, changed_item, getattr(item, changed_item))
@@ -103,10 +112,10 @@ def fsitem_add_or_update(session, item):
 
 
 def logd_status(itemcount, changes, elapsed, last_commit_len):
-	status = ("(%s) items = %r, speed = %.2f items/sec, " + \
-		"changes = %r, speed = %.2f changes/sec")%(
-		last_commit_len, itemcount, itemcount / elapsed,
-		changes, changes / elapsed
+	status = ("(%s) items = %r, speed = %.2f items/sec, "
+		+ "changes = %r, speed = %.2f changes/sec") % (
+		last_commit_len, itemcount, itemcount / elapsed
+		, changes, changes / elapsed
 	)
 	logd(status)
 	#~ if changes>100:
@@ -125,14 +134,14 @@ def get_folder_id(session, fp_item):
 	desc = get_description(fp_item)
 
 	if db_item is None:
-		if len(session.new)>0:
+		if len(session.new) > 0:
 			logd("get_folder_id:	%s %s", len(session.new), session.new)
 		db_item = FSItemFolder(name=fp_item, description=desc)
 		session.add(db_item)
 		session.commit()
 	else:
-		if db_item.description!=desc:
-			db_item.description=desc
+		if db_item.description != desc:
+			db_item.description = desc
 
 	return db_item.id
 
@@ -145,14 +154,14 @@ def get_type_id(session, fp_item, s=None):
 			try:
 				t = magic.from_file(fp_item)
 
-			except magic.magic.MagicException as e:
+			except magic.magic.MagicException:
 				#~ loge(str_obj(e))
 				t = "Error: magic exception"
 
 			except FileNotFoundError:
-				t = "cannot open %r"%fp_item
+				t = "cannot open %r" % fp_item
 
-			except PermissionError as e:
+			except PermissionError:
 				t = "Error: permission denied"
 
 			if t.startswith("cannot open "):
@@ -195,48 +204,50 @@ def get_description(fp_item):
 		for line in f:
 			line = line.strip()
 			#~ logd(line)
-			if line[0]=="\"":
+			if line[0] == "\"":
 				bq = 1
 				eq = line.find("\"", bq)
 				#~ logd("bq=%r, eq=%r", bq, eq)
 				fn = line[bq:eq]
-				d = line[eq+2:]
+				d = line[eq + 2:]
 			else:
 				#~ logd(line)
 				eq = line.find(" ")
 				fn = line[:eq]
-				d = line[eq+1:]
+				d = line[eq + 1:]
 				#~ logd("fn=%s, d=%s", fn, d)
 
-			if fn==name:
+			if fn == name:
 				#~ logd("Description for '%s' found '%s'", name, d)
 				return d
 
 	return None
 
-# win32 code begin =============================================================
+# win32 code begin ============================================================
 
-from ctypes import *
-from ctypes.wintypes import *
+from ctypes import WinDLL, WinError # noqa
+from ctypes.wintypes import DWORD, LPCWSTR, HANDLE, LPVOID, BOOL, LPDWORD \
+	, USHORT, ULONG, WCHAR, c_buffer, c_ubyte, Structure, Union, addressof \
+	, byref # noqa
 
 kernel32 = WinDLL('kernel32')
 
 GetFileAttributesW = kernel32.GetFileAttributesW
 GetFileAttributesW.restype = DWORD
-GetFileAttributesW.argtypes = (LPCWSTR,) #lpFileName In
+GetFileAttributesW.argtypes = (LPCWSTR,)		# lpFileName In
 
 INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
 FILE_ATTRIBUTE_REPARSE_POINT = 0x00400
 
 CreateFileW = kernel32.CreateFileW
 CreateFileW.restype = HANDLE
-CreateFileW.argtypes = (LPCWSTR, #lpFileName In
-						DWORD,   #dwDesiredAccess In
-						DWORD,   #dwShareMode In
-						LPVOID,  #lpSecurityAttributes In_opt
-						DWORD,   #dwCreationDisposition In
-						DWORD,   #dwFlagsAndAttributes In
-						HANDLE)  #hTemplateFile In_opt
+CreateFileW.argtypes = (LPCWSTR,		# lpFileName In
+						DWORD,			# dwDesiredAccess In
+						DWORD,			# dwShareMode In
+						LPVOID,			# lpSecurityAttributes In_opt
+						DWORD,			# dwCreationDisposition In
+						DWORD,			# dwFlagsAndAttributes In
+						HANDLE)			# hTemplateFile In_opt
 
 OPEN_EXISTING = 3
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
@@ -246,21 +257,23 @@ MAXIMUM_REPARSE_DATA_BUFFER_SIZE = 0x4000
 
 DeviceIoControl = kernel32.DeviceIoControl
 DeviceIoControl.restype = BOOL
-DeviceIoControl.argtypes = (HANDLE,  #hDevice In
-							DWORD,   #dwIoControlCode In
-							LPVOID,  #lpInBuffer In_opt
-							DWORD,   #nInBufferSize In
-							LPVOID,  #lpOutBuffer Out_opt
-							DWORD,   #nOutBufferSize In
-							LPDWORD, #lpBytesReturned Out_opt
-							LPVOID)  #lpOverlapped Inout_opt
+DeviceIoControl.argtypes = (HANDLE,			# hDevice In
+							DWORD,			# dwIoControlCode In
+							LPVOID,			# lpInBuffer In_opt
+							DWORD,			# nInBufferSize In
+							LPVOID,			# lpOutBuffer Out_opt
+							DWORD,			# nOutBufferSize In
+							LPDWORD,		# lpBytesReturned Out_opt
+							LPVOID)			# lpOverlapped Inout_opt
 
 FSCTL_GET_REPARSE_POINT = 0x000900A8
 
 UCHAR = c_ubyte
 
+
 class GENERIC_REPARSE_BUFFER(Structure):
 	_fields_ = (('DataBuffer', UCHAR * 1),)
+
 
 class SYMBOLIC_LINK_REPARSE_BUFFER(Structure):
 	_fields_ = (('SubstituteNameOffset', USHORT),
@@ -269,11 +282,13 @@ class SYMBOLIC_LINK_REPARSE_BUFFER(Structure):
 				('PrintNameLength', USHORT),
 				('Flags', ULONG),
 				('PathBuffer', WCHAR * 1))
+
 	@property
 	def PrintName(self):
 		arrayt = WCHAR * (self.PrintNameLength // 2)
 		offset = type(self).PathBuffer.offset + self.PrintNameOffset
 		return arrayt.from_address(addressof(self) + offset).value
+
 
 class MOUNT_POINT_REPARSE_BUFFER(Structure):
 	_fields_ = (('SubstituteNameOffset', USHORT),
@@ -281,11 +296,13 @@ class MOUNT_POINT_REPARSE_BUFFER(Structure):
 				('PrintNameOffset', USHORT),
 				('PrintNameLength', USHORT),
 				('PathBuffer', WCHAR * 1))
+
 	@property
 	def PrintName(self):
 		arrayt = WCHAR * (self.PrintNameLength // 2)
 		offset = type(self).PathBuffer.offset + self.PrintNameOffset
 		return arrayt.from_address(addressof(self) + offset).value
+
 
 class REPARSE_DATA_BUFFER(Structure):
 	class REPARSE_BUFFER(Union):
@@ -301,9 +318,11 @@ class REPARSE_DATA_BUFFER(Structure):
 				('ReparseBuffer', REPARSE_BUFFER))
 	_anonymous_ = ('ReparseBuffer',)
 
+
 CloseHandle = kernel32.CloseHandle
 CloseHandle.restype = BOOL
-CloseHandle.argtypes = (HANDLE,) #hObject In
+CloseHandle.argtypes = (HANDLE,)		# hObject In
+
 
 def isNTFSlink(path):
 	result = GetFileAttributesW(path)
@@ -311,28 +330,33 @@ def isNTFSlink(path):
 		raise WinError()
 	return bool(result & FILE_ATTRIBUTE_REPARSE_POINT)
 
+
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
 IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 
+
 def NTFSreadlink(path):
-	reparse_point_handle = CreateFileW(path,
-									   0,
-									   0,
-									   None,
-									   OPEN_EXISTING,
-									   FILE_FLAG_OPEN_REPARSE_POINT |
-									   FILE_FLAG_BACKUP_SEMANTICS,
-									   None)
+	reparse_point_handle = CreateFileW(
+		path,
+		0,
+		0,
+		None,
+		OPEN_EXISTING,
+		FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+		None)
+
 	if reparse_point_handle == INVALID_HANDLE_VALUE:
 		raise WinError()
+
 	target_buffer = c_buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE)
 	n_bytes_returned = DWORD()
-	io_result = DeviceIoControl(reparse_point_handle,
-								FSCTL_GET_REPARSE_POINT,
-								None, 0,
-								target_buffer, len(target_buffer),
-								byref(n_bytes_returned),
-								None)
+	io_result = DeviceIoControl(
+		reparse_point_handle,
+		FSCTL_GET_REPARSE_POINT,
+		None, 0,
+		target_buffer, len(target_buffer),
+		byref(n_bytes_returned),
+		None)
 	CloseHandle(reparse_point_handle)
 	if not io_result:
 		raise WinError()
@@ -343,7 +367,8 @@ def NTFSreadlink(path):
 		return rdb.MountPointReparseBuffer.PrintName
 	raise ValueError("not a link")
 
-# win32 code end ===============================================================
+# win32 code end ==============================================================
+
 
 def updatedb(startpath):
 
@@ -353,7 +378,7 @@ def updatedb(startpath):
 
 	paths = [startpath]
 
-	dt_scan = datetime.now()	# scaning datetime
+	dt_scan = datetime.now()		# scaning datetime
 
 	itemcount = 0
 	changes = 0
@@ -361,7 +386,7 @@ def updatedb(startpath):
 
 	t_start = time.perf_counter()
 
-	while len(paths)>0:
+	while len(paths) > 0:
 
 		path = paths.pop(0)
 
@@ -371,37 +396,37 @@ def updatedb(startpath):
 		target = None
 		try:
 			target = os.readlink(path)
-		except ValueError as e:
+		except ValueError:
 			pass
 
 		except OSError as e:
-			if e.errno==13:
+			if e.errno == 13:
 				type_id = get_type_id(session, path, "Error: permission denied")
 				folder_id = get_folder_id(session, os.path.dirname(path))
 
 				item_stat = os.stat(path, follow_symlinks=False)
 
 				fsitem = FSItem(
-					folder_id	= folder_id,
-					name		= os.path.basename(path),
-					type_id		= type_id,
-					inode		= item_stat.st_ino,
-					nlink		= item_stat.st_nlink,
-					dev			= item_stat.st_dev,
-					size		= item_stat.st_size,
-					target		= target,
-					description	= get_description(path),
-					stime		= dt_scan,
-					atime		= datetime.fromtimestamp(item_stat.st_atime),
-					mtime		= datetime.fromtimestamp(item_stat.st_mtime),
-					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+					folder_id=folder_id,
+					name=os.path.basename(path),
+					type_id=type_id,
+					inode=item_stat.st_ino,
+					nlink=item_stat.st_nlink,
+					dev=item_stat.st_dev,
+					size=item_stat.st_size,
+					target=target,
+					description=get_description(path),
+					stime=dt_scan,
+					atime=datetime.fromtimestamp(item_stat.st_atime),
+					mtime=datetime.fromtimestamp(item_stat.st_mtime),
+					ctime=datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
 				#~ logd(fsitem)
 				changes += fsitem_add_or_update(session, fsitem)
 				continue
 
-			elif not e.errno in (22,):
+			elif e.errno not in (22,):
 				loge(path)
 				loge(str_obj(e))
 				stop()
@@ -422,19 +447,19 @@ def updatedb(startpath):
 			item_stat = os.stat(path, follow_symlinks=False)
 
 			fsitem = FSItem(
-				folder_id	= folder_id,
-				name		= os.path.basename(path),
-				type_id		= type_id,
-				inode		= item_stat.st_ino,
-				nlink		= item_stat.st_nlink,
-				dev			= item_stat.st_dev,
-				size		= item_stat.st_size,
-				target		= target,
-				description	= get_description(path),
-				stime		= dt_scan,
-				atime		= datetime.fromtimestamp(item_stat.st_atime),
-				mtime		= datetime.fromtimestamp(item_stat.st_mtime),
-				ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+				folder_id=folder_id,
+				name=os.path.basename(path),
+				type_id=type_id,
+				inode=item_stat.st_ino,
+				nlink=item_stat.st_nlink,
+				dev=item_stat.st_dev,
+				size=item_stat.st_size,
+				target=target,
+				description=get_description(path),
+				stime=dt_scan,
+				atime=datetime.fromtimestamp(item_stat.st_atime),
+				mtime=datetime.fromtimestamp(item_stat.st_mtime),
+				ctime=datetime.fromtimestamp(item_stat.st_ctime)
 			)
 
 			#~ logd(fsitem)
@@ -445,27 +470,28 @@ def updatedb(startpath):
 			itemlist = os.listdir(path)
 
 		except PermissionError as e:
-			if e.errno==13:
+			if e.errno == 13:
 				logw("Permission denied: '%s'", path)
-				type_id = get_type_id(session, path, "Error: permission denied")
+				type_id = get_type_id(session, path
+					, "Error: permission denied")
 				folder_id = get_folder_id(session, os.path.dirname(path))
 
 				item_stat = os.stat(path, follow_symlinks=False)
 
 				fsitem = FSItem(
-					folder_id	= folder_id,
-					name		= os.path.basename(path),
-					type_id		= type_id,
-					inode		= item_stat.st_ino,
-					nlink		= item_stat.st_nlink,
-					dev			= item_stat.st_dev,
-					size		= item_stat.st_size,
-					target		= target,
-					description	= get_description(path),
-					stime		= dt_scan,
-					atime		= datetime.fromtimestamp(item_stat.st_atime),
-					mtime		= datetime.fromtimestamp(item_stat.st_mtime),
-					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+					folder_id=folder_id,
+					name=os.path.basename(path),
+					type_id=type_id,
+					inode=item_stat.st_ino,
+					nlink=item_stat.st_nlink,
+					dev=item_stat.st_dev,
+					size=item_stat.st_size,
+					target=target,
+					description=get_description(path),
+					stime=dt_scan,
+					atime=datetime.fromtimestamp(item_stat.st_atime),
+					mtime=datetime.fromtimestamp(item_stat.st_mtime),
+					ctime=datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
 				#~ logd(fsitem)
@@ -489,15 +515,15 @@ def updatedb(startpath):
 			logw("Folder '%s' excluded by config", path)
 			continue
 
-		if len(itemlist)==0:
+		if len(itemlist) == 0:
 			continue
 
-		folder_id = None	#get_folder_id(path)
+		folder_id = None		# get_folder_id(path)
 
 		sep_count = path.count(os.sep)
 
-		if sep_count<=cfg.showpath_level:
-			if len(itemlist)>cfg.big_items_count_in_folder:
+		if sep_count <= cfg.showpath_level:
+			if len(itemlist) > cfg.big_items_count_in_folder:
 				logi("%7d %s ...", len(itemlist), path)
 
 		for item in itemlist:
@@ -522,7 +548,7 @@ def updatedb(startpath):
 				paths.append(fp_item)
 
 			elif stat.S_ISREG(item_stat.st_mode) or \
-				stat.S_ISLNK(item_stat.st_mode):	# regular file or symlink
+				stat.S_ISLNK(item_stat.st_mode):  # regular file or symlink
 
 				if stat.S_ISLNK(item_stat.st_mode):
 					target = os.readlink(fp_item)
@@ -535,31 +561,31 @@ def updatedb(startpath):
 					folder_id = get_folder_id(session, path)
 
 				fsitem = FSItem(
-					folder_id	= folder_id,
-					name		= item,
-					type_id		= type_id,
-					inode		= item_stat.st_ino,
-					nlink		= item_stat.st_nlink,
-					dev			= item_stat.st_dev,
-					size		= item_stat.st_size,
-					target		= target,
-					description	= get_description(fp_item),
-					stime		= dt_scan,
-					atime		= datetime.fromtimestamp(item_stat.st_atime),
-					mtime		= datetime.fromtimestamp(item_stat.st_mtime),
-					ctime		= datetime.fromtimestamp(item_stat.st_ctime)
+					folder_id=folder_id,
+					name=item,
+					type_id=type_id,
+					inode=item_stat.st_ino,
+					nlink=item_stat.st_nlink,
+					dev=item_stat.st_dev,
+					size=item_stat.st_size,
+					target=target,
+					description=get_description(fp_item),
+					stime=dt_scan,
+					atime=datetime.fromtimestamp(item_stat.st_atime),
+					mtime=datetime.fromtimestamp(item_stat.st_mtime),
+					ctime=datetime.fromtimestamp(item_stat.st_ctime)
 				)
 
 				changes += fsitem_add_or_update(session, fsitem)
 
-				if changes!=0 and changes % COMMIT_INTERVAL == 0:
-					if len(session.new)>0:
+				if changes != 0 and changes % COMMIT_INTERVAL == 0:
+					if len(session.new) > 0:
 						#~ logd("updatedb:	%s %s",
 							#~ len(session.new), session.new)
 						last_commit_len = len(session.new)
 						session.commit()
 
-				if itemcount!=0 and itemcount % COMMIT_INTERVAL == 0:
+				if itemcount != 0 and itemcount % COMMIT_INTERVAL == 0:
 					elapsed = time.perf_counter() - t_start
 					logd_status(itemcount, changes, elapsed, last_commit_len)
 
@@ -586,10 +612,10 @@ def parse_commandline(args):
 
 	ap.add_argument("-e", "--exclude-folder", action="append",
 		dest="exclude_folder", help="folder to exclude from scaning"
-		" %s"%cfg.exclude_folders)
+		" %s" % cfg.exclude_folders)
 
 	ap.add_argument("-r", "--recreate", action="store_true", default=False,
-		dest="recreate", help="create new database %s"%cfg.fn_database)
+		dest="recreate", help="create new database %s" % cfg.fn_database)
 
 	ap.add_argument("-v", "--show-config", action="store_true", default=False,
 		dest="show_config", help="show config")
@@ -599,7 +625,7 @@ def parse_commandline(args):
 		help="use magic python library to detect file type")
 
 	ap.add_argument("-s", "--save-config", action="store_true", default=False,
-		dest="save_config", help="save config changes to %s"%cfg.fn_config)
+		dest="save_config", help="save config changes to %s" % cfg.fn_config)
 
 	ns = ap.parse_args(args[1:])
 
@@ -613,7 +639,7 @@ def parse_commandline(args):
 
 	cfg.type_use_magic = ns.type_use_magic
 
-	if ns.exclude_folder is not None and len(ns.exclude_folder)>0:
+	if ns.exclude_folder is not None and len(ns.exclude_folder) > 0:
 		cfg.exclude_folders.extend(ns.exclude_folder)
 		#~ for f in ns.exclude_folder:
 			#~ cfg.exclude_folders.append(envvar2path(f))
@@ -643,8 +669,9 @@ def parse_commandline(args):
 	cfg.exclude_folders = list(map(envvar2path, cfg.exclude_folders))
 	#~ print(cfg)
 
+
 def logd_checked_deleted(checked, deleted, elapsed):
-	logd("Checked %d, deleted %s items in %.2f sec"%(
+	logd("Checked %d, deleted %s items in %.2f sec" % (
 		checked, deleted, elapsed))
 
 
@@ -722,7 +749,7 @@ def clear_empty_folders(t_start, session):
 	checked = 0
 	logd("Checking empty %d folders...", len(folders))
 	for f in folders:
-		if len(f.fsitems)==0:
+		if len(f.fsitems) == 0:
 			logd("Delete %s", f.name)
 			session.delete(f)
 			deleted += 1
@@ -747,7 +774,7 @@ def cleardb():
 
 	deleted = clear_nonexist_files(time.perf_counter(), session)
 
-	if deleted>0:
+	if deleted > 0:
 		clear_empty_folders(time.perf_counter(), session)
 
 	session.close()
@@ -758,9 +785,9 @@ def cleardb():
 
 
 def envvar2path(ev):
-	if ev[0]=="%":
+	if ev[0] == "%":
 		# win32
-		if ev[-1]=="%":
+		if ev[-1] == "%":
 			varname = ev[1:-1]
 		else:
 			varname = ev[1:]
@@ -770,7 +797,7 @@ def envvar2path(ev):
 		else:
 			return ev
 
-	elif ev[0]=="$":
+	elif ev[0] == "$":
 		# linux
 		varname = ev[1:]
 		if varname in os.environ:
@@ -809,7 +836,7 @@ def main():
 	logd("elapsed %.9f", time.perf_counter() - t_start)
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
 	main()
 	#~ for item in ("%SystemRoot%", "$SystemRoot", "$HOME", "$HOME111", "%home%",
 				#~ "%USERPROFILE%", "$USERPROFILE", "%USERPROFILE",
